@@ -15,7 +15,7 @@ Built in Go for Windows (single runnable `.exe`), it tests configurations direct
   - **Trojan:** TLS, WebSocket, and gRPC transports.
   - **Shadowsocks:** Standard SIP002 (plain / base64 userinfo) and legacy base64 URI formats.
 - **Flexible Subscription Handling:**
-  - Includes 5 curated default subscriptions out of the box.
+  - Includes 4 curated default subscriptions out of the box.
   - Automatically rewrites GitHub `/blob/` URLs to `raw.githubusercontent.com`.
   - Decodes raw plain-text links, single/multiline Base64 (standard and URL-safe, padded and unpadded), and mixed subscription payloads.
   - Normalizes and deduplicates duplicate configurations (ignoring remark `#fragments` for uniqueness).
@@ -87,7 +87,7 @@ Show failed tests in addition to successful ones:
 | `-url` | `string` | `https://x.com` | Target test URL for end-to-end HTTP GET verification. |
 | `-c` | `int` | `20` | Concurrency level (number of worker goroutines). |
 | `-timeout` | `duration` | `15s` | Timeout for each proxy configuration test. |
-| `-default-subs` | `bool` | `true` | Whether to include the 5 built-in subscriptions. |
+| `-default-subs` | `bool` | `true` | Whether to include the 4 built-in subscriptions. |
 | `-sub` | `string` | *(empty)* | Custom subscription URL(s) (repeatable or comma-separated). |
 | `-v`, `-verbose` | `bool` | `false` | Enable verbose output (prints failed tests). |
 
@@ -124,11 +124,10 @@ Duration:      3m 42s
 
 ## Built-In Default Subscriptions
 
-1. `https://raw.githubusercontent.com/Epodonios/v2ray-configs/main/All_Configs_Sub.txt`
-2. `https://raw.githubusercontent.com/barry-far/V2ray-Config/main/All_Configs_Sub.txt`
-3. `https://github.com/ebrasha/free-v2ray-public-list/blob/main/V2Ray-Config-By-EbraSha-All-Type.txt` (auto-rewritten to raw)
-4. `https://raw.githubusercontent.com/MatinGhanbari/v2ray-configs/main/subscriptions/v2ray/all_sub.txt`
-5. `https://raw.githubusercontent.com/0xRadikal/Free-v2ray-Configs/main/all/configs.txt`
+1. `https://raw.githubusercontent.com/barry-far/V2ray-Config/main/All_Configs_Sub.txt`
+2. `https://github.com/ebrasha/free-v2ray-public-list/blob/main/V2Ray-Config-By-EbraSha-All-Type.txt` (auto-rewritten to raw)
+3. `https://raw.githubusercontent.com/MatinGhanbari/v2ray-configs/main/subscriptions/v2ray/all_sub.txt`
+4. `https://raw.githubusercontent.com/0xRadikal/Free-v2ray-Configs/main/all/configs.txt`
 
 ---
 

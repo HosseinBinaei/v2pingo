@@ -38,7 +38,7 @@ func main() {
 	targetURLFlag := flag.String("url", "https://x.com", "Target test URL")
 	concurrencyFlag := flag.Int("c", 20, "Concurrency workers")
 	timeoutFlag := flag.Duration("timeout", 15*time.Second, "Test timeout duration")
-	defaultSubsFlag := flag.Bool("default-subs", true, "Include 5 built-in subscriptions")
+	defaultSubsFlag := flag.Bool("default-subs", true, "Include 4 built-in subscriptions")
 	var verboseFlag bool
 	flag.BoolVar(&verboseFlag, "v", false, "Enable verbose failure output")
 	flag.BoolVar(&verboseFlag, "verbose", false, "Enable verbose failure output")

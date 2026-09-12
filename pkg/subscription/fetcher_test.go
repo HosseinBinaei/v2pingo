@@ -64,8 +64,8 @@ func TestNormalizeURL(t *testing.T) {
 }
 
 func TestDefaultSubscriptions(t *testing.T) {
-	if len(DefaultSubscriptions) != 5 {
-		t.Errorf("expected 5 default subscriptions, got %d", len(DefaultSubscriptions))
+	if len(DefaultSubscriptions) != 4 {
+		t.Errorf("expected 4 default subscriptions, got %d", len(DefaultSubscriptions))
 	}
 	for _, u := range DefaultSubscriptions {
 		if !strings.HasPrefix(u, "https://") {

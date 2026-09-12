@@ -78,11 +78,10 @@ The goal is to provide a clean, high-performance, single-binary CLI application 
 
 ### 3.1 Subscriptions & Link Extraction
 * **Default Subscriptions:**
-  1. `https://raw.githubusercontent.com/Epodonios/v2ray-configs/main/All_Configs_Sub.txt`
-  2. `https://raw.githubusercontent.com/barry-far/V2ray-Config/main/All_Configs_Sub.txt`
-  3. `https://github.com/ebrasha/free-v2ray-public-list/blob/main/V2Ray-Config-By-EbraSha-All-Type.txt` (auto-normalized to raw)
-  4. `https://raw.githubusercontent.com/MatinGhanbari/v2ray-configs/main/subscriptions/v2ray/all_sub.txt`
-  5. `https://raw.githubusercontent.com/0xRadikal/Free-v2ray-Configs/main/all/configs.txt`
+  1. `https://raw.githubusercontent.com/barry-far/V2ray-Config/main/All_Configs_Sub.txt`
+  2. `https://github.com/ebrasha/free-v2ray-public-list/blob/main/V2Ray-Config-By-EbraSha-All-Type.txt` (auto-normalized to raw)
+  3. `https://raw.githubusercontent.com/MatinGhanbari/v2ray-configs/main/subscriptions/v2ray/all_sub.txt`
+  4. `https://raw.githubusercontent.com/0xRadikal/Free-v2ray-Configs/main/all/configs.txt`
 * **URL Normalization:** Transforms `github.com/<owner>/<repo>/blob/<branch>/<path>` to `raw.githubusercontent.com/<owner>/<repo>/<branch>/<path>`.
 * **Decoding Logic:**
   * Checks for scheme prefixes directly (`vless://`, `vmess://`, `trojan://`, `ss://`).
