@@ -139,7 +139,7 @@ func parseVLESS(rawLink string, index int) (*types.ProxyConfig, error) {
 		Options: option.Outbound{
 			Type:    "vless",
 			Tag:     "proxy",
-			Options: vlessOpt,
+			Options: &vlessOpt,
 		},
 	}, nil
 }

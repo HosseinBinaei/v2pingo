@@ -181,7 +181,7 @@ func parseVMess(rawLink string, index int) (*types.ProxyConfig, error) {
 		Options: option.Outbound{
 			Type:    "vmess",
 			Tag:     "proxy",
-			Options: vmessOpt,
+			Options: &vmessOpt,
 		},
 	}, nil
 }

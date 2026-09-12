@@ -126,7 +126,7 @@ func parseShadowsocks(rawLink string, index int) (*types.ProxyConfig, error) {
 		Options: option.Outbound{
 			Type:    "shadowsocks",
 			Tag:     "proxy",
-			Options: ssOpt,
+			Options: &ssOpt,
 		},
 	}, nil
 }

@@ -40,9 +40,9 @@ func TestParseVLESSReality(t *testing.T) {
 		t.Errorf("expected Type vless, Tag proxy; got Type %s, Tag %s", opt.Type, opt.Tag)
 	}
 
-	vlessOpt, ok := opt.Options.(option.VLESSOutboundOptions)
+	vlessOpt, ok := opt.Options.(*option.VLESSOutboundOptions)
 	if !ok {
-		t.Fatalf("expected option.VLESSOutboundOptions, got %T", opt.Options)
+		t.Fatalf("expected *option.VLESSOutboundOptions, got %T", opt.Options)
 	}
 
 	if vlessOpt.Server != "example.com" || vlessOpt.ServerPort != 443 {
@@ -87,9 +87,9 @@ func TestParseVLESSWS(t *testing.T) {
 		t.Fatalf("ParseAndConvert returned error: %v", err)
 	}
 
-	vlessOpt, ok := cfg.Options.Options.(option.VLESSOutboundOptions)
+	vlessOpt, ok := cfg.Options.Options.(*option.VLESSOutboundOptions)
 	if !ok {
-		t.Fatalf("expected option.VLESSOutboundOptions, got %T", cfg.Options.Options)
+		t.Fatalf("expected *option.VLESSOutboundOptions, got %T", cfg.Options.Options)
 	}
 
 	if vlessOpt.Transport == nil || vlessOpt.Transport.Type != "ws" {
@@ -134,9 +134,9 @@ func TestParseVMess(t *testing.T) {
 		t.Errorf("host/port mismatch: %s:%d", cfg.Host, cfg.Port)
 	}
 
-	vmessOpt, ok := cfg.Options.Options.(option.VMessOutboundOptions)
+	vmessOpt, ok := cfg.Options.Options.(*option.VMessOutboundOptions)
 	if !ok {
-		t.Fatalf("expected option.VMessOutboundOptions, got %T", cfg.Options.Options)
+		t.Fatalf("expected *option.VMessOutboundOptions, got %T", cfg.Options.Options)
 	}
 	if vmessOpt.UUID != "12345678-1234-1234-1234-123456789012" {
 		t.Errorf("UUID mismatch: %s", vmessOpt.UUID)
@@ -160,9 +160,9 @@ func TestParseTrojan(t *testing.T) {
 	if cfg.Protocol != "trojan" {
 		t.Errorf("expected Protocol trojan, got %s", cfg.Protocol)
 	}
-	trojanOpt, ok := cfg.Options.Options.(option.TrojanOutboundOptions)
+	trojanOpt, ok := cfg.Options.Options.(*option.TrojanOutboundOptions)
 	if !ok {
-		t.Fatalf("expected option.TrojanOutboundOptions, got %T", cfg.Options.Options)
+		t.Fatalf("expected *option.TrojanOutboundOptions, got %T", cfg.Options.Options)
 	}
 	if trojanOpt.Password != "mysecretpassword" {
 		t.Errorf("Password mismatch: %s", trojanOpt.Password)
@@ -187,9 +187,9 @@ func TestParseShadowsocksSIP002(t *testing.T) {
 	if cfg.Protocol != "shadowsocks" {
 		t.Errorf("expected Protocol shadowsocks, got %s", cfg.Protocol)
 	}
-	ssOpt, ok := cfg.Options.Options.(option.ShadowsocksOutboundOptions)
+	ssOpt, ok := cfg.Options.Options.(*option.ShadowsocksOutboundOptions)
 	if !ok {
-		t.Fatalf("expected option.ShadowsocksOutboundOptions, got %T", cfg.Options.Options)
+		t.Fatalf("expected *option.ShadowsocksOutboundOptions, got %T", cfg.Options.Options)
 	}
 	if ssOpt.Method != "aes-256-gcm" || ssOpt.Password != "password123" {
 		t.Errorf("Method/Password mismatch: %s / %s", ssOpt.Method, ssOpt.Password)
@@ -208,9 +208,9 @@ func TestParseShadowsocksLegacy(t *testing.T) {
 	if cfg.Protocol != "shadowsocks" {
 		t.Errorf("expected Protocol shadowsocks, got %s", cfg.Protocol)
 	}
-	ssOpt, ok := cfg.Options.Options.(option.ShadowsocksOutboundOptions)
+	ssOpt, ok := cfg.Options.Options.(*option.ShadowsocksOutboundOptions)
 	if !ok {
-		t.Fatalf("expected option.ShadowsocksOutboundOptions, got %T", cfg.Options.Options)
+		t.Fatalf("expected *option.ShadowsocksOutboundOptions, got %T", cfg.Options.Options)
 	}
 	if ssOpt.Server != "ss.example.com" || ssOpt.ServerPort != 8388 {
 		t.Errorf("Server/Port mismatch: %s:%d", ssOpt.Server, ssOpt.ServerPort)

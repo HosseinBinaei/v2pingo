@@ -128,7 +128,7 @@ func parseTrojan(rawLink string, index int) (*types.ProxyConfig, error) {
 		Options: option.Outbound{
 			Type:    "trojan",
 			Tag:     "proxy",
-			Options: trojanOpt,
+			Options: &trojanOpt,
 		},
 	}, nil
 }
