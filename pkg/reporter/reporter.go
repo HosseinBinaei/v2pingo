@@ -19,6 +19,7 @@ type Reporter struct {
 	successCount         int
 	failCount            int
 	lastReportedProgress int
+	progressActive       bool
 	successfulLinks      []string
 	out                  io.Writer
 }
@@ -28,6 +29,13 @@ func NewReporter(totalConfigs int, verbose bool) *Reporter {
 		totalConfigs: totalConfigs,
 		verbose:      verbose,
 		out:          os.Stdout,
+	}
+}
+
+func (r *Reporter) clearProgressLine() {
+	if r.progressActive && r.out != nil {
+		fmt.Fprint(r.out, "\r\033[K")
+		r.progressActive = false
 	}
 }
 
@@ -42,6 +50,7 @@ func (r *Reporter) Record(res types.TestResult) {
 			r.successfulLinks = append(r.successfulLinks, res.Config.RawLink)
 		}
 		if r.out != nil {
+			r.clearProgressLine()
 			fmt.Fprintf(r.out, "[✓ SUCCESS] [#%d] [%s] %s - %v (HTTP %d)\n",
 				res.Config.Index,
 				res.Config.Protocol,
@@ -57,6 +66,7 @@ func (r *Reporter) Record(res types.TestResult) {
 			if res.Error != nil {
 				errReason = res.Error.Error()
 			}
+			r.clearProgressLine()
 			fmt.Fprintf(r.out, "[✗ FAILED] [#%d] [%s] %s - %s\n",
 				res.Config.Index,
 				res.Config.Protocol,
@@ -72,7 +82,7 @@ func (r *Reporter) Record(res types.TestResult) {
 }
 
 func (r *Reporter) printProgress() {
-	if r.lastReportedProgress == r.testedCount {
+	if r.lastReportedProgress == r.testedCount && r.progressActive {
 		return
 	}
 	r.lastReportedProgress = r.testedCount
@@ -81,6 +91,7 @@ func (r *Reporter) printProgress() {
 		pct = (float64(r.testedCount) / float64(r.totalConfigs)) * 100.0
 	}
 	fmt.Fprintf(r.out, "\rProgress: %.1f%% (%d/%d tested)", pct, r.testedCount, r.totalConfigs)
+	r.progressActive = true
 }
 
 func (r *Reporter) SaveResults() (string, error) {
@@ -91,6 +102,8 @@ func (r *Reporter) SaveResults() (string, error) {
 	if out == nil {
 		out = os.Stdout
 	}
+
+	r.clearProgressLine()
 
 	timestamp := time.Now().Format("20060102_150405")
 	filename := fmt.Sprintf("results_%s.md", timestamp)
@@ -122,8 +135,9 @@ func (r *Reporter) PrintSummary(duration time.Duration) {
 	if r.testedCount != r.lastReportedProgress && r.testedCount > 0 {
 		r.printProgress()
 	}
-	if r.lastReportedProgress > 0 {
+	if r.progressActive {
 		fmt.Fprintln(out)
+		r.progressActive = false
 	}
 
 	// Format duration cleanly

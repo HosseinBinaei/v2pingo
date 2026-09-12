@@ -229,3 +229,37 @@ func TestReporter_ProgressIndicator(t *testing.T) {
 		t.Errorf("expected 100.0%% progress output at end, got: %q", outStr)
 	}
 }
+
+func TestReporter_ProgressClearingBeforeLog(t *testing.T) {
+	var buf bytes.Buffer
+	r := NewReporter(2500, false)
+	r.out = &buf
+
+	// Record 100 results to trigger progress update
+	for i := 1; i <= 100; i++ {
+		r.Record(types.TestResult{
+			Config:  types.ProxyConfig{Index: i, Protocol: "vless", Host: "127.0.0.1", Port: 80},
+			Success: false,
+		})
+	}
+
+	progressStr := "Progress: 4.0% (100/2500 tested)"
+	if !strings.Contains(buf.String(), progressStr) {
+		t.Fatalf("expected progress string in buffer, got %q", buf.String())
+	}
+
+	// 101st result is a success log
+	r.Record(types.TestResult{
+		Config:     types.ProxyConfig{Index: 101, Protocol: "vless", Host: "1.1.1.1", Port: 443},
+		Success:    true,
+		StatusCode: 200,
+		Latency:    50 * time.Millisecond,
+	})
+
+	outStr := buf.String()
+	// Verify clear line escape code \r\033[K is printed right before the success log
+	expectedLog := "\r\033[K[✓ SUCCESS] [#101] [vless] 1.1.1.1:443 - 50ms (HTTP 200)\n"
+	if !strings.Contains(outStr, expectedLog) {
+		t.Errorf("expected clear line code before log message.\nGot:\n%q\nExpected to contain:\n%q", outStr, expectedLog)
+	}
+}
