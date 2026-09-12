@@ -39,7 +39,9 @@ func main() {
 	concurrencyFlag := flag.Int("c", 20, "Concurrency workers")
 	timeoutFlag := flag.Duration("timeout", 15*time.Second, "Test timeout duration")
 	defaultSubsFlag := flag.Bool("default-subs", true, "Include 5 built-in subscriptions")
-	verboseFlag := flag.Bool("v", false, "Enable verbose failure output")
+	var verboseFlag bool
+	flag.BoolVar(&verboseFlag, "v", false, "Enable verbose failure output")
+	flag.BoolVar(&verboseFlag, "verbose", false, "Enable verbose failure output")
 
 	var subFlags stringSliceFlag
 	flag.Var(&subFlags, "sub", "Custom subscription URL (repeatable or comma-separated)")
@@ -80,7 +82,7 @@ func main() {
 	rootCtx, rootCancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer rootCancel()
 
-	rep := reporter.NewReporter(len(configs), *verboseFlag)
+	rep := reporter.NewReporter(len(configs), verboseFlag)
 
 	startTime := time.Now()
 	tester.RunPool(rootCtx, configs, *targetURLFlag, *concurrencyFlag, *timeoutFlag, rep.Record)
