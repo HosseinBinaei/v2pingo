@@ -1,0 +1,261 @@
+package subscription
+
+import (
+	"context"
+	"encoding/base64"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+)
+
+func TestNormalizeURL(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "GitHub blob URL standard",
+			input:    "https://github.com/ebrasha/free-v2ray-public-list/blob/main/V2Ray-Config-By-EbraSha-All-Type.txt",
+			expected: "https://raw.githubusercontent.com/ebrasha/free-v2ray-public-list/main/V2Ray-Config-By-EbraSha-All-Type.txt",
+		},
+		{
+			name:     "GitHub blob URL with whitespace",
+			input:    "  https://github.com/user/repo/blob/master/sub.txt \n\t",
+			expected: "https://raw.githubusercontent.com/user/repo/master/sub.txt",
+		},
+		{
+			name:     "GitHub blob URL with http prefix",
+			input:    "http://github.com/user/repo/blob/v1/sub.txt",
+			expected: "https://raw.githubusercontent.com/user/repo/v1/sub.txt",
+		},
+		{
+			name:     "GitHub raw URL untouched",
+			input:    "https://raw.githubusercontent.com/user/repo/main/sub.txt",
+			expected: "https://raw.githubusercontent.com/user/repo/main/sub.txt",
+		},
+		{
+			name:     "Regular non-GitHub URL",
+			input:    "https://example.com/sub/list.txt",
+			expected: "https://example.com/sub/list.txt",
+		},
+		{
+			name:     "Empty URL",
+			input:    "   ",
+			expected: "",
+		},
+		{
+			name:     "Invalid parseable URL",
+			input:    "https://example.com/a b/c",
+			expected: "https://example.com/a b/c",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := NormalizeURL(tt.input)
+			if got != tt.expected {
+				t.Errorf("NormalizeURL(%q) = %q, want %q", tt.input, got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestDefaultSubscriptions(t *testing.T) {
+	if len(DefaultSubscriptions) != 5 {
+		t.Errorf("expected 5 default subscriptions, got %d", len(DefaultSubscriptions))
+	}
+	for _, u := range DefaultSubscriptions {
+		if !strings.HasPrefix(u, "https://") {
+			t.Errorf("expected https URL in default subscriptions, got %q", u)
+		}
+	}
+}
+
+func TestExtractProxyLinks(t *testing.T) {
+	input := `
+# Comment line
+vless://uuid-1@1.1.1.1:443?security=tls#Node1
+vmess://eyJ2IjoiMiIsInBzIjoiTm9kZTIifQ==
+invalid-link://something
+trojan://pass@2.2.2.2:443#Node3
+ss://YWVzLTEyOC1nY206cGFzc0AxLjEuMS4xOjQ0Mw==#Node4
+
+   vless://uuid-2@3.3.3.3:443?type=ws#Node5   
+`
+	links := ExtractProxyLinks(input)
+	expected := []string{
+		"vless://uuid-1@1.1.1.1:443?security=tls#Node1",
+		"vmess://eyJ2IjoiMiIsInBzIjoiTm9kZTIifQ==",
+		"trojan://pass@2.2.2.2:443#Node3",
+		"ss://YWVzLTEyOC1nY206cGFzc0AxLjEuMS4xOjQ0Mw==#Node4",
+		"vless://uuid-2@3.3.3.3:443?type=ws#Node5",
+	}
+
+	if len(links) != len(expected) {
+		t.Fatalf("ExtractProxyLinks returned %d links, want %d: %v", len(links), len(expected), links)
+	}
+
+	for i, exp := range expected {
+		if links[i] != exp {
+			t.Errorf("links[%d] = %q, want %q", i, links[i], exp)
+		}
+	}
+}
+
+func TestDecodePayload(t *testing.T) {
+	sampleLinks := []string{
+		"vless://uuid-1@1.1.1.1:443?security=tls#Node1",
+		"vmess://eyJ2IjoiMiIsInBzIjoiTm9kZTIifQ==",
+		"trojan://pass@2.2.2.2:443#Node3",
+		"ss://YWVzLTEyOC1nY206cGFzc0AxLjEuMS4xOjQ0Mw==#Node4",
+	}
+	rawText := strings.Join(sampleLinks, "\n")
+
+	t.Run("Plain text payload", func(t *testing.T) {
+		got := DecodePayload([]byte(rawText))
+		if len(got) != len(sampleLinks) {
+			t.Fatalf("DecodePayload returned %d links, want %d", len(got), len(sampleLinks))
+		}
+		for i, exp := range sampleLinks {
+			if got[i] != exp {
+				t.Errorf("got[%d] = %q, want %q", i, got[i], exp)
+			}
+		}
+	})
+
+	t.Run("Base64 StdEncoding single block", func(t *testing.T) {
+		encoded := base64.StdEncoding.EncodeToString([]byte(rawText))
+		got := DecodePayload([]byte(encoded))
+		if len(got) != len(sampleLinks) {
+			t.Fatalf("DecodePayload returned %d links, want %d", len(got), len(sampleLinks))
+		}
+	})
+
+	t.Run("Base64 RawStdEncoding (unpadded)", func(t *testing.T) {
+		encoded := base64.RawStdEncoding.EncodeToString([]byte(rawText))
+		got := DecodePayload([]byte(encoded))
+		if len(got) != len(sampleLinks) {
+			t.Fatalf("DecodePayload returned %d links, want %d", len(got), len(sampleLinks))
+		}
+	})
+
+	t.Run("Base64 URLEncoding", func(t *testing.T) {
+		encoded := base64.URLEncoding.EncodeToString([]byte(rawText))
+		got := DecodePayload([]byte(encoded))
+		if len(got) != len(sampleLinks) {
+			t.Fatalf("DecodePayload returned %d links, want %d", len(got), len(sampleLinks))
+		}
+	})
+
+	t.Run("Base64 RawURLEncoding", func(t *testing.T) {
+		encoded := base64.RawURLEncoding.EncodeToString([]byte(rawText))
+		got := DecodePayload([]byte(encoded))
+		if len(got) != len(sampleLinks) {
+			t.Fatalf("DecodePayload returned %d links, want %d", len(got), len(sampleLinks))
+		}
+	})
+
+	t.Run("Base64 with newlines interspersed", func(t *testing.T) {
+		encoded := base64.StdEncoding.EncodeToString([]byte(rawText))
+		// insert newlines every 20 chars
+		var chunked string
+		for i := 0; i < len(encoded); i += 20 {
+			end := i + 20
+			if end > len(encoded) {
+				end = len(encoded)
+			}
+			chunked += encoded[i:end] + "\r\n"
+		}
+		got := DecodePayload([]byte(chunked))
+		if len(got) != len(sampleLinks) {
+			t.Fatalf("DecodePayload returned %d links, want %d", len(got), len(sampleLinks))
+		}
+	})
+
+	t.Run("Mixed format payload (plain + base64 lines)", func(t *testing.T) {
+		b64part := base64.StdEncoding.EncodeToString([]byte("vless://b64@5.5.5.5:443#B64Node"))
+		mixed := "trojan://pass@6.6.6.6:443#PlainNode\n" + b64part + "\n# Some comment\n"
+		got := DecodePayload([]byte(mixed))
+		if len(got) != 2 {
+			t.Fatalf("DecodePayload returned %d links, want 2: %v", len(got), got)
+		}
+		if got[0] != "trojan://pass@6.6.6.6:443#PlainNode" {
+			t.Errorf("got[0] = %q", got[0])
+		}
+		if got[1] != "vless://b64@5.5.5.5:443#B64Node" {
+			t.Errorf("got[1] = %q", got[1])
+		}
+	})
+
+	t.Run("Empty or garbage payload", func(t *testing.T) {
+		got := DecodePayload([]byte("random binary garbage \x00\x01\x02 \r\n not a config"))
+		if len(got) != 0 {
+			t.Errorf("expected 0 links for garbage, got %d", len(got))
+		}
+	})
+}
+
+func TestFetchSubscriptions(t *testing.T) {
+	userAgentReceived := ""
+	ts1 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		userAgentReceived = r.Header.Get("User-Agent")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("vless://user1@1.1.1.1:443#Server1\nvmess://eyJ2IjoiMiJ9#Server1VMess\n"))
+	}))
+	defer ts1.Close()
+
+	ts2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		encoded := base64.StdEncoding.EncodeToString([]byte("trojan://pass@2.2.2.2:443#Server2\n"))
+		w.Write([]byte(encoded))
+	}))
+	defer ts2.Close()
+
+	ts404 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		w.Write([]byte("Not Found"))
+	}))
+	defer ts404.Close()
+
+	ts500 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte("Internal Server Error"))
+	}))
+	defer ts500.Close()
+
+	t.Run("Fetch multiple URLs with resilience to failures", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		urls := []string{
+			ts1.URL,
+			ts404.URL,
+			"http://127.0.0.1:0/invalid-port", // network error
+			ts2.URL,
+			ts500.URL,
+		}
+
+		links := FetchSubscriptions(ctx, urls, nil)
+		expectedCount := 3 // 2 from ts1 + 1 from ts2
+		if len(links) != expectedCount {
+			t.Fatalf("FetchSubscriptions returned %d links, want %d: %v", len(links), expectedCount, links)
+		}
+
+		if !strings.Contains(userAgentReceived, "v2ray") && !strings.Contains(userAgentReceived, "v2rayN") {
+			t.Errorf("User-Agent header was %q, expected v2rayN user agent", userAgentReceived)
+		}
+	})
+
+	t.Run("Context cancellation handling", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel() // cancel immediately
+
+		links := FetchSubscriptions(ctx, []string{ts1.URL}, nil)
+		if len(links) != 0 {
+			t.Errorf("expected 0 links on canceled context, got %d", len(links))
+		}
+	})
+}
