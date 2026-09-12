@@ -1,0 +1,113 @@
+package reporter
+
+import (
+	"fmt"
+	"io"
+	"os"
+	"sync"
+	"time"
+
+	"v2pingo/pkg/types"
+)
+
+type Reporter struct {
+	mu           sync.Mutex
+	totalConfigs int
+	verbose      bool
+	testedCount  int
+	successCount int
+	failCount    int
+	out          io.Writer
+}
+
+func NewReporter(totalConfigs int, verbose bool) *Reporter {
+	return &Reporter{
+		totalConfigs: totalConfigs,
+		verbose:      verbose,
+		out:          os.Stdout,
+	}
+}
+
+func (r *Reporter) Record(res types.TestResult) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	r.testedCount++
+	if res.Success {
+		r.successCount++
+		if r.out != nil {
+			fmt.Fprintf(r.out, "[✓ SUCCESS] [#%d] [%s] %s - %v (HTTP %d)\n",
+				res.Config.Index,
+				res.Config.Protocol,
+				res.Config.Target(),
+				res.Latency,
+				res.StatusCode,
+			)
+		}
+	} else {
+		r.failCount++
+		if r.verbose && r.out != nil {
+			errReason := "unknown"
+			if res.Error != nil {
+				errReason = res.Error.Error()
+			}
+			fmt.Fprintf(r.out, "[✗ FAILED] [#%d] [%s] %s - %s\n",
+				res.Config.Index,
+				res.Config.Protocol,
+				res.Config.Target(),
+				errReason,
+			)
+		}
+	}
+}
+
+func (r *Reporter) PrintSummary(duration time.Duration) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	out := r.out
+	if out == nil {
+		out = os.Stdout
+	}
+
+	// Format duration cleanly
+	durStr := formatDuration(duration)
+
+	fmt.Fprintln(out, "==================================================")
+	fmt.Fprintln(out, "TEST SUMMARY")
+	fmt.Fprintln(out, "==================================================s"[:50]) // exact separator
+	// Let's make sure exact line matches spec
+	// spec:
+	// ==================================================
+	// TEST SUMMARY
+	// ==================================================
+	// Total configs: 2500
+	// Tested:        2500
+	// Success:       180
+	// Failed:        2320
+	// Duration:      8m 12s
+	// ==================================================
+	fmt.Fprintf(out, "Total configs: %d\n", r.totalConfigs)
+	fmt.Fprintf(out, "Tested:        %d\n", r.testedCount)
+	fmt.Fprintf(out, "Success:       %d\n", r.successCount)
+	fmt.Fprintf(out, "Failed:        %d\n", r.failCount)
+	fmt.Fprintf(out, "Duration:      %s\n", durStr)
+	fmt.Fprintln(out, "==================================================")
+}
+
+func formatDuration(d time.Duration) string {
+	if d < 0 {
+		d = 0
+	}
+	h := int(d.Hours())
+	m := int(d.Minutes()) % 60
+	s := int(d.Seconds()) % 60
+
+	if h > 0 {
+		return fmt.Sprintf("%dh %dm %ds", h, m, s)
+	}
+	if m > 0 {
+		return fmt.Sprintf("%dm %ds", m, s)
+	}
+	return fmt.Sprintf("%ds", int(d.Round(time.Second).Seconds()))
+}

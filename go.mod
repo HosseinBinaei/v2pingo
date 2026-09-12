@@ -5,14 +5,19 @@ go 1.27.0
 require github.com/sagernet/sing-box v1.14.0
 
 require (
+	github.com/ajg/form v1.5.1 // indirect
 	github.com/andybalholm/brotli v1.1.0 // indirect
+	github.com/anytls/sing-anytls v0.0.11 // indirect
 	github.com/caddyserver/certmagic v0.25.3-0.20260421143802-60d9d8b415d6 // indirect
 	github.com/caddyserver/zerossl v0.1.5 // indirect
+	github.com/coder/websocket v1.8.14 // indirect
+	github.com/cretz/bine v0.2.0 // indirect
 	github.com/database64128/netx-go v0.1.1 // indirect
 	github.com/database64128/tfo-go/v2 v2.3.2 // indirect
 	github.com/florianl/go-nfqueue/v2 v2.1.0 // indirect
 	github.com/fsnotify/fsnotify v1.9.0 // indirect
 	github.com/go-chi/chi/v5 v5.2.5 // indirect
+	github.com/go-chi/render v1.0.3 // indirect
 	github.com/go-ole/go-ole v1.3.0 // indirect
 	github.com/gobwas/httphead v0.1.0 // indirect
 	github.com/gobwas/pool v0.2.1 // indirect
@@ -36,6 +41,7 @@ require (
 	github.com/miekg/dns v1.1.72 // indirect
 	github.com/quic-go/qpack v0.6.0 // indirect
 	github.com/sagernet/bbolt v0.0.0-20260823094646-e24805439c9c // indirect
+	github.com/sagernet/cors v1.2.1 // indirect
 	github.com/sagernet/fswatch v0.1.2 // indirect
 	github.com/sagernet/gvisor v0.0.0-20260727.0-sing-box-mod.1 // indirect
 	github.com/sagernet/netlink v0.0.0-20260814022025-64455d367bbf // indirect
@@ -43,8 +49,11 @@ require (
 	github.com/sagernet/quic-go v0.61.0-sing-box-mod.7 // indirect
 	github.com/sagernet/sing v0.9.0-beta.4 // indirect
 	github.com/sagernet/sing-mux v0.3.5 // indirect
+	github.com/sagernet/sing-quic v0.7.0-beta.4 // indirect
 	github.com/sagernet/sing-shadowsocks v0.2.8 // indirect
 	github.com/sagernet/sing-shadowsocks2 v0.2.1 // indirect
+	github.com/sagernet/sing-shadowtls v0.2.1 // indirect
+	github.com/sagernet/sing-snell v0.0.0-20260829071736-20f2eaec77c3 // indirect
 	github.com/sagernet/sing-tun v0.9.0-beta.4 // indirect
 	github.com/sagernet/sing-usbip v0.0.0-20260817040617-28bd42667eca // indirect
 	github.com/sagernet/sing-vmess v0.2.8-0.20250909125414-3aed155119a1 // indirect
