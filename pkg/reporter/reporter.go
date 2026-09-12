@@ -12,14 +12,15 @@ import (
 )
 
 type Reporter struct {
-	mu              sync.Mutex
-	totalConfigs    int
-	verbose         bool
-	testedCount     int
-	successCount    int
-	failCount       int
-	successfulLinks []string
-	out             io.Writer
+	mu                   sync.Mutex
+	totalConfigs         int
+	verbose              bool
+	testedCount          int
+	successCount         int
+	failCount            int
+	lastReportedProgress int
+	successfulLinks      []string
+	out                  io.Writer
 }
 
 func NewReporter(totalConfigs int, verbose bool) *Reporter {
@@ -64,6 +65,22 @@ func (r *Reporter) Record(res types.TestResult) {
 			)
 		}
 	}
+
+	if r.out != nil && (r.testedCount%100 == 0 || r.testedCount == r.totalConfigs) {
+		r.printProgress()
+	}
+}
+
+func (r *Reporter) printProgress() {
+	if r.lastReportedProgress == r.testedCount {
+		return
+	}
+	r.lastReportedProgress = r.testedCount
+	var pct float64
+	if r.totalConfigs > 0 {
+		pct = (float64(r.testedCount) / float64(r.totalConfigs)) * 100.0
+	}
+	fmt.Fprintf(r.out, "\rProgress: %.1f%% (%d/%d tested)", pct, r.testedCount, r.totalConfigs)
 }
 
 func (r *Reporter) SaveResults() (string, error) {
@@ -100,6 +117,13 @@ func (r *Reporter) PrintSummary(duration time.Duration) {
 	out := r.out
 	if out == nil {
 		out = os.Stdout
+	}
+
+	if r.testedCount != r.lastReportedProgress && r.testedCount > 0 {
+		r.printProgress()
+	}
+	if r.lastReportedProgress > 0 {
+		fmt.Fprintln(out)
 	}
 
 	// Format duration cleanly

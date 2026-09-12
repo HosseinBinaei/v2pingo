@@ -184,3 +184,48 @@ func TestReporter_SaveResults(t *testing.T) {
 		t.Errorf("expected stdout to mention saved filename, got: %q", buf.String())
 	}
 }
+
+func TestReporter_ProgressIndicator(t *testing.T) {
+	var buf bytes.Buffer
+	r := NewReporter(2500, false)
+	r.out = &buf
+
+	// Record 99 results
+	for i := 1; i <= 99; i++ {
+		r.Record(types.TestResult{
+			Config:  types.ProxyConfig{Index: i, Protocol: "vless", Host: "127.0.0.1", Port: 80},
+			Success: false,
+		})
+	}
+
+	if strings.Contains(buf.String(), "Progress:") {
+		t.Errorf("expected no progress output before 100 tests, got: %q", buf.String())
+	}
+
+	// 100th result should trigger progress update
+	r.Record(types.TestResult{
+		Config:  types.ProxyConfig{Index: 100, Protocol: "vless", Host: "127.0.0.1", Port: 80},
+		Success: false,
+	})
+
+	if !strings.Contains(buf.String(), "Progress: 4.0% (100/2500 tested)") {
+		t.Errorf("expected 4.0%% progress output at 100 tests, got: %q", buf.String())
+	}
+
+	buf.Reset()
+
+	// Create reporter with 150 total configs and record 150 tests to check end batch update
+	r2 := NewReporter(150, false)
+	r2.out = &buf
+	for i := 1; i <= 150; i++ {
+		r2.Record(types.TestResult{
+			Config:  types.ProxyConfig{Index: i, Protocol: "vless", Host: "127.0.0.1", Port: 80},
+			Success: false,
+		})
+	}
+
+	outStr := buf.String()
+	if !strings.Contains(outStr, "Progress: 100.0% (150/150 tested)") {
+		t.Errorf("expected 100.0%% progress output at end, got: %q", outStr)
+	}
+}
