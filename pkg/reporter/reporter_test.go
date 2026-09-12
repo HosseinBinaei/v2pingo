@@ -3,6 +3,7 @@ package reporter
 import (
 	"bytes"
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -126,5 +127,60 @@ Duration:      8m 12s
 
 	if !strings.Contains(output, expectedSummary) {
 		t.Errorf("summary output mismatch.\nGot:\n%s\nExpected to contain:\n%s", output, expectedSummary)
+	}
+}
+
+func TestReporter_SaveResults(t *testing.T) {
+	var buf bytes.Buffer
+	r := NewReporter(2, false)
+	r.out = &buf
+
+	r.Record(types.TestResult{
+		Config: types.ProxyConfig{
+			Index:    1,
+			Protocol: "vless",
+			Host:     "1.1.1.1",
+			Port:     443,
+			RawLink:  "vless://user@1.1.1.1:443#node1",
+		},
+		Success:    true,
+		StatusCode: 200,
+		Latency:    100 * time.Millisecond,
+	})
+
+	r.Record(types.TestResult{
+		Config: types.ProxyConfig{
+			Index:    2,
+			Protocol: "vmess",
+			Host:     "2.2.2.2",
+			Port:     443,
+			RawLink:  "vmess://encoded_config_string",
+		},
+		Success: false,
+		Error:   fmt.Errorf("timeout"),
+	})
+
+	filename, err := r.SaveResults()
+	if err != nil {
+		t.Fatalf("unexpected error saving results: %v", err)
+	}
+	defer os.Remove(filename)
+
+	if !strings.HasPrefix(filename, "results_") || !strings.HasSuffix(filename, ".md") {
+		t.Errorf("unexpected filename pattern: %s", filename)
+	}
+
+	content, err := os.ReadFile(filename)
+	if err != nil {
+		t.Fatalf("failed to read saved file: %v", err)
+	}
+
+	expectedContent := "vless://user@1.1.1.1:443#node1\n"
+	if string(content) != expectedContent {
+		t.Errorf("file content mismatch.\nGot:\n%q\nExpected:\n%q", string(content), expectedContent)
+	}
+
+	if !strings.Contains(buf.String(), filename) {
+		t.Errorf("expected stdout to mention saved filename, got: %q", buf.String())
 	}
 }

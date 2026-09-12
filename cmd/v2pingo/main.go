@@ -89,4 +89,7 @@ func main() {
 	duration := time.Since(startTime)
 
 	rep.PrintSummary(duration)
+	if _, err := rep.SaveResults(); err != nil {
+		fmt.Fprintf(os.Stderr, "Error saving results: %v\n", err)
+	}
 }

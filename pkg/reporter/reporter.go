@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -11,13 +12,14 @@ import (
 )
 
 type Reporter struct {
-	mu           sync.Mutex
-	totalConfigs int
-	verbose      bool
-	testedCount  int
-	successCount int
-	failCount    int
-	out          io.Writer
+	mu              sync.Mutex
+	totalConfigs    int
+	verbose         bool
+	testedCount     int
+	successCount    int
+	failCount       int
+	successfulLinks []string
+	out             io.Writer
 }
 
 func NewReporter(totalConfigs int, verbose bool) *Reporter {
@@ -35,6 +37,9 @@ func (r *Reporter) Record(res types.TestResult) {
 	r.testedCount++
 	if res.Success {
 		r.successCount++
+		if res.StatusCode == 200 && res.Config.RawLink != "" {
+			r.successfulLinks = append(r.successfulLinks, res.Config.RawLink)
+		}
 		if r.out != nil {
 			fmt.Fprintf(r.out, "[✓ SUCCESS] [#%d] [%s] %s - %v (HTTP %d)\n",
 				res.Config.Index,
@@ -59,6 +64,33 @@ func (r *Reporter) Record(res types.TestResult) {
 			)
 		}
 	}
+}
+
+func (r *Reporter) SaveResults() (string, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	out := r.out
+	if out == nil {
+		out = os.Stdout
+	}
+
+	timestamp := time.Now().Format("20060102_150405")
+	filename := fmt.Sprintf("results_%s.md", timestamp)
+
+	var sb strings.Builder
+	for _, link := range r.successfulLinks {
+		sb.WriteString(link)
+		sb.WriteString("\n")
+	}
+
+	err := os.WriteFile(filename, []byte(sb.String()), 0644)
+	if err != nil {
+		return "", fmt.Errorf("failed to save results to file %s: %w", filename, err)
+	}
+
+	fmt.Fprintf(out, "Saved %d HTTP 200 configuration(s) to %s\n", len(r.successfulLinks), filename)
+	return filename, nil
 }
 
 func (r *Reporter) PrintSummary(duration time.Duration) {
