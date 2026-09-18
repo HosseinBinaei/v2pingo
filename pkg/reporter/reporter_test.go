@@ -166,9 +166,9 @@ func TestReporter_SaveResults(t *testing.T) {
 	}
 	defer os.Remove(filename)
 
-	if !strings.HasPrefix(filename, "results_") || !strings.HasSuffix(filename, ".md") {
-		t.Errorf("unexpected filename pattern: %s", filename)
-	}
+		if !strings.Contains(filename, "results") || !strings.HasSuffix(filename, ".md") {
+			t.Errorf("unexpected filename pattern: %s", filename)
+		}
 
 	content, err := os.ReadFile(filename)
 	if err != nil {

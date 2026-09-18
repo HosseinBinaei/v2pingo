@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -105,8 +106,14 @@ func (r *Reporter) SaveResults() (string, error) {
 
 	r.clearProgressLine()
 
+	// Ensure results directory exists
+	resultsDir := "results"
+	if err := os.MkdirAll(resultsDir, 0755); err != nil {
+		return "", fmt.Errorf("failed to create results directory: %w", err)
+	}
+
 	timestamp := time.Now().Format("20060102_150405")
-	filename := fmt.Sprintf("results_%s.md", timestamp)
+	filename := filepath.Join(resultsDir, fmt.Sprintf("results_%s.md", timestamp))
 
 	var sb strings.Builder
 	for _, link := range r.successfulLinks {
