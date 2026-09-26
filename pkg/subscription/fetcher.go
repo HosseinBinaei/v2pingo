@@ -5,21 +5,73 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 	"unicode"
 )
 
-// DefaultSubscriptions contains curated public V2Ray subscription endpoints.
-var DefaultSubscriptions = []string{
-	"https://raw.githubusercontent.com/barry-far/V2ray-Config/main/All_Configs_Sub.txt",
-	"https://github.com/ebrasha/free-v2ray-public-list/blob/main/V2Ray-Config-By-EbraSha-All-Type.txt",
-	"https://raw.githubusercontent.com/MatinGhanbari/v2ray-configs/main/subscriptions/v2ray/all_sub.txt",
-	"https://raw.githubusercontent.com/0xRadikal/Free-v2ray-Configs/main/all/configs.txt",
+// DefaultSubscriptionFile is the project-root file that lists the subscription
+// URLs to test, one URL per line.
+const DefaultSubscriptionFile = "sub-input.txt"
+
+// LoadSubscriptionFile reads subscription URLs from a plain-text file, one URL
+// per line. Blank lines and lines starting with '#' are ignored and duplicate
+// URLs are removed while their original order is preserved.
+func LoadSubscriptionFile(path string) ([]string, error) {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read subscription file %s: %w", path, err)
+	}
+
+	var urls []string
+	seen := make(map[string]bool)
+	scanner := bufio.NewScanner(bytes.NewReader(content))
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		if seen[line] {
+			continue
+		}
+		seen[line] = true
+		urls = append(urls, line)
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("failed to read subscription file %s: %w", path, err)
+	}
+
+	return urls, nil
+}
+
+// ResolveSubscriptionFile returns the path of the subscription list file. The
+// provided path is used when it exists, otherwise the directory that holds the
+// running executable is checked so the tool also works when it is started from
+// another working directory.
+func ResolveSubscriptionFile(path string) string {
+	if _, err := os.Stat(path); err == nil {
+		return path
+	}
+	if filepath.IsAbs(path) {
+		return path
+	}
+	executable, err := os.Executable()
+	if err != nil {
+		return path
+	}
+	candidate := filepath.Join(filepath.Dir(executable), filepath.Base(path))
+	if _, err := os.Stat(candidate); err == nil {
+		return candidate
+	}
+	return path
 }
 
 // NormalizeURL trims spaces and rewrites GitHub /blob/ URLs into raw.githubusercontent.com URLs.
@@ -175,10 +227,17 @@ func FetchSubscriptions(ctx context.Context, urls []string, client *http.Client)
 }
 
 func isProxyLink(s string) bool {
-	return strings.HasPrefix(s, "vless://") ||
-		strings.HasPrefix(s, "vmess://") ||
-		strings.HasPrefix(s, "trojan://") ||
-		strings.HasPrefix(s, "ss://")
+	lower := strings.ToLower(s)
+	return strings.HasPrefix(lower, "vless://") ||
+		strings.HasPrefix(lower, "vmess://") ||
+		strings.HasPrefix(lower, "trojan://") ||
+		strings.HasPrefix(lower, "ss://") ||
+		strings.HasPrefix(lower, "socks://") ||
+		strings.HasPrefix(lower, "socks5://") ||
+		strings.HasPrefix(lower, "hysteria2://") ||
+		strings.HasPrefix(lower, "hy2://") ||
+		strings.HasPrefix(lower, "wireguard://") ||
+		strings.HasPrefix(lower, "wg://")
 }
 
 func stripWhitespace(b []byte) []byte {

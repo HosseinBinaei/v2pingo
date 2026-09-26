@@ -38,7 +38,8 @@ func main() {
 	targetURLFlag := flag.String("url", "https://x.com", "Target test URL")
 	concurrencyFlag := flag.Int("c", 20, "Concurrency workers")
 	timeoutFlag := flag.Duration("timeout", 15*time.Second, "Test timeout duration")
-	defaultSubsFlag := flag.Bool("default-subs", true, "Include 4 built-in subscriptions")
+	defaultSubsFlag := flag.Bool("default-subs", true, "Include the subscription URLs listed in the sub-input file")
+	subFileFlag := flag.String("sub-file", subscription.DefaultSubscriptionFile, "Path to the subscription list file (one URL per line)")
 	var verboseFlag bool
 	flag.BoolVar(&verboseFlag, "v", false, "Enable verbose failure output")
 	flag.BoolVar(&verboseFlag, "verbose", false, "Enable verbose failure output")
@@ -51,12 +52,19 @@ func main() {
 	// Assemble subscription URL list
 	var subURLs []string
 	if *defaultSubsFlag {
-		subURLs = append(subURLs, subscription.DefaultSubscriptions...)
+		subFilePath := subscription.ResolveSubscriptionFile(*subFileFlag)
+		fileSubs, err := subscription.LoadSubscriptionFile(subFilePath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
+		} else {
+			fmt.Printf("Loaded %d subscription URL(s) from %s\n", len(fileSubs), subFilePath)
+		}
+		subURLs = append(subURLs, fileSubs...)
 	}
 	subURLs = append(subURLs, subFlags...)
 
 	if len(subURLs) == 0 {
-		fmt.Fprintln(os.Stderr, "Error: no subscription URLs provided (enable -default-subs or specify -sub)")
+		fmt.Fprintf(os.Stderr, "Error: no subscription URLs provided (add them to %s or specify -sub)\n", *subFileFlag)
 		os.Exit(1)
 	}
 

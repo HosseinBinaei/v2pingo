@@ -10,11 +10,15 @@ import (
 // ProxyConfig holds normalized configuration details for a parsed proxy node.
 type ProxyConfig struct {
 	Index    int
-	Protocol string // "vless", "vmess", "trojan", "shadowsocks"
+	Protocol string // "vless", "vmess", "trojan", "shadowsocks", "socks", "hysteria2", "wireguard"
 	Host     string
 	Port     uint16
 	RawLink  string
 	Options  option.Outbound
+	// Endpoint is set for protocols that sing-box exposes as endpoints instead
+	// of outbounds (currently WireGuard). When it is non-nil the node is tested
+	// through the endpoint manager and Options is ignored.
+	Endpoint *option.Endpoint
 }
 
 // Target returns the formatted host:port string for the proxy destination.

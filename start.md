@@ -2,6 +2,8 @@
 
 `v2pingo` is a fast CLI tool for testing V2Ray-compatible proxy configurations directly in memory.
 
+It supports **VLESS**, **VMess**, **Trojan**, **Shadowsocks**, **SOCKS**, **Hysteria2** and **WireGuard** share links.
+
 ---
 
 ## 1. Build
@@ -14,9 +16,29 @@ go build -o v2pingo.exe ./cmd/v2pingo
 
 ---
 
-## 2. Default Test
+## 2. Subscription List File
 
-Run the simplest command to test using built-in subscriptions, the default target URL (`https://x.com`), default concurrency (`20`), and default timeout (`15s`):
+The subscriptions to test are read from `sub-input.txt` in the project root — one URL per line:
+
+```text
+# lines starting with '#' and blank lines are ignored
+https://raw.githubusercontent.com/barry-far/V2ray-Config/main/All_Configs_Sub.txt
+https://github.com/ebrasha/free-v2ray-public-list/blob/main/V2Ray-Config-By-EbraSha-All-Type.txt
+```
+
+Add a line to include another subscription, delete a line to drop one. Every remaining line is fetched and tested. Use a different file with:
+
+```powershell
+.\v2pingo.exe -sub-file "D:\my-subs.txt"
+```
+
+> If `sub-input.txt` is not found in the current working directory, the folder that contains `v2pingo.exe` is checked as a fallback.
+
+---
+
+## 3. Default Test
+
+Run the simplest command to test using the subscription file, the default target URL (`https://x.com`), default concurrency (`20`), and default timeout (`15s`):
 
 ```powershell
 .\v2pingo.exe
@@ -24,7 +46,7 @@ Run the simplest command to test using built-in subscriptions, the default targe
 
 ---
 
-## 3. Custom Target
+## 4. Custom Target
 
 Test connectivity to a specific website or domain:
 
@@ -37,7 +59,7 @@ Test connectivity to a specific website or domain:
 
 ---
 
-## 4. Custom Concurrency & Timeout
+## 5. Custom Concurrency & Timeout
 
 Adjust worker count and request timeout for your network conditions:
 
@@ -52,11 +74,11 @@ Adjust worker count and request timeout for your network conditions:
 
 ---
 
-## 5. Custom Subscriptions
+## 6. Custom Subscriptions
 
-Disable built-in subscriptions or supply your own custom subscription URLs.
+Disable the subscription file and supply your own subscription URLs instead.
 
-**Single custom subscription (disabling default subscriptions):**
+**Single custom subscription:**
 ```powershell
 .\v2pingo.exe -default-subs=false -sub "https://example.com/sub.txt"
 ```
@@ -66,11 +88,11 @@ Disable built-in subscriptions or supply your own custom subscription URLs.
 .\v2pingo.exe -sub "https://site1.com/sub.txt" -sub "https://site2.com/sub.txt"
 ```
 
-*(You can also pass comma-separated URLs or combine `-sub` with default subscriptions.)*
+*(You can also pass comma-separated URLs or combine `-sub` with the subscription file.)*
 
 ---
 
-## 6. Verbose Mode
+## 7. Verbose Mode
 
 Enable verbose output to view failed proxy tests alongside sanitized error reasons:
 
@@ -80,7 +102,7 @@ Enable verbose output to view failed proxy tests alongside sanitized error reaso
 
 ---
 
-## 7. Results File
+## 8. Results File
 
 Configurations that return an **HTTP 200** status code are automatically saved at the end of execution (or upon pressing Ctrl+C) to a Markdown file:
 
@@ -92,7 +114,7 @@ The file contains the working proxy configurations saved as original share links
 
 ---
 
-## 8. Stop / Ctrl+C
+## 9. Stop / Ctrl+C
 
 Pressing **Ctrl+C** during a test run will:
 
@@ -103,7 +125,7 @@ Pressing **Ctrl+C** during a test run will:
 
 ---
 
-## 9. Practical Recommended Examples
+## 10. Practical Recommended Examples
 
 **Quick default test:**
 ```powershell
@@ -120,6 +142,11 @@ Pressing **Ctrl+C** during a test run will:
 .\v2pingo.exe -url https://youtube.com -timeout 10s
 ```
 
+**Test using a custom subscription file:**
+```powershell
+.\v2pingo.exe -sub-file "D:\my-subs.txt" -c 30
+```
+
 **Test exclusively against custom subscriptions:**
 ```powershell
 .\v2pingo.exe -default-subs=false -sub "https://example.com/sub.txt" -c 30
@@ -132,11 +159,12 @@ Pressing **Ctrl+C** during a test run will:
 
 ---
 
-## 10. Important Notes
+## 11. Important Notes
 
 * **Internet Access:** `v2pingo` requires an active internet connection to fetch subscription lists and perform target URL checks.
 * **Target-Dependent Results:** A proxy may succeed for one target URL (e.g., `https://google.com`) but fail or time out for another.
 * **HTTP 200 Verification:** An **HTTP 200** response confirms the proxy successfully connected, proxied the traffic, and received a standard successful HTTP response from the target server.
 * **HTTP 403 / 404 / Non-200 Status:** Status codes like 403 or 404 mean the proxy connection itself succeeded, but the target server or cloudflare/CDN returned an error response.
 * **Real HTTP Requests:** `v2pingo` does not perform a simple ping to the proxy IP. It executes a real HTTP request routed through the in-process proxy core.
+* **Protocol Support:** VLESS, VMess, Trojan, Shadowsocks, SOCKS5, Hysteria2 and WireGuard. WireGuard nodes are tested through a sing-box endpoint, and Hysteria2 nodes always use TLS.
 * **Credential Safety:** Do not expose or publicly share result files containing sensitive or private proxy credentials.

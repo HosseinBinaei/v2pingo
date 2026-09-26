@@ -2,6 +2,7 @@ package tester
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 	"github.com/sagernet/sing-box/include"
 	"github.com/sagernet/sing-box/option"
 	M "github.com/sagernet/sing/common/metadata"
+	N "github.com/sagernet/sing/common/network"
 
 	"v2pingo/pkg/types"
 )
@@ -39,7 +41,13 @@ func TestProxy(ctx context.Context, cfg types.ProxyConfig, targetURL string, tim
 			Disabled: true,
 			Level:    "panic",
 		},
-		Outbounds: []option.Outbound{cfg.Options},
+	}
+	// WireGuard is exposed by sing-box as an endpoint, every other supported
+	// protocol is a regular outbound.
+	if cfg.Endpoint != nil {
+		boxOptions.Endpoints = []option.Endpoint{*cfg.Endpoint}
+	} else {
+		boxOptions.Outbounds = []option.Outbound{cfg.Options}
 	}
 
 	b, err := box.New(box.Options{
@@ -63,19 +71,19 @@ func TestProxy(ctx context.Context, cfg types.ProxyConfig, targetURL string, tim
 	}
 	defer b.Close()
 
-	out, ok := b.Outbound().Outbound("proxy")
-	if !ok {
+	dialer, err := resolveDialer(b, cfg)
+	if err != nil {
 		return types.TestResult{
 			Config:  cfg,
 			Success: false,
-			Error:   net.ErrClosed,
+			Error:   err,
 		}
 	}
 
 	transport := &http.Transport{
 		DialContext: func(dc context.Context, network, addr string) (net.Conn, error) {
 			destination := M.ParseSocksaddr(addr)
-			return out.DialContext(dc, network, destination)
+			return dialer.DialContext(dc, network, destination)
 		},
 		DisableKeepAlives:   true,
 		TLSHandshakeTimeout: timeout,
@@ -116,6 +124,25 @@ func TestProxy(ctx context.Context, cfg types.ProxyConfig, targetURL string, tim
 		StatusCode: resp.StatusCode,
 		Latency:    latency,
 	}
+}
+
+// resolveDialer returns the in-process dialer of the tested node. Nodes backed by
+// an endpoint (WireGuard) are resolved through the endpoint manager, every other
+// node through the outbound manager.
+func resolveDialer(b *box.Box, cfg types.ProxyConfig) (N.Dialer, error) {
+	if cfg.Endpoint != nil {
+		endpoint, ok := b.Endpoint().Get(cfg.Endpoint.Tag)
+		if !ok {
+			return nil, fmt.Errorf("endpoint %q not found in box", cfg.Endpoint.Tag)
+		}
+		return endpoint, nil
+	}
+
+	outbound, ok := b.Outbound().Outbound(cfg.Options.Tag)
+	if !ok {
+		return nil, fmt.Errorf("outbound %q not found in box", cfg.Options.Tag)
+	}
+	return outbound, nil
 }
 
 func RunPool(ctx context.Context, configs []types.ProxyConfig, targetURL string, concurrency int, timeout time.Duration, onResult func(types.TestResult)) {

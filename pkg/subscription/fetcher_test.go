@@ -5,6 +5,8 @@ import (
 	"encoding/base64"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -63,14 +65,63 @@ func TestNormalizeURL(t *testing.T) {
 	}
 }
 
-func TestDefaultSubscriptions(t *testing.T) {
-	if len(DefaultSubscriptions) != 4 {
-		t.Errorf("expected 4 default subscriptions, got %d", len(DefaultSubscriptions))
+func TestLoadSubscriptionFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "sub-input.txt")
+	content := strings.Join([]string{
+		"# v2pingo subscription list",
+		"",
+		"https://example.com/one.txt",
+		"   ",
+		"https://example.com/two.txt",
+		"  https://example.com/three.txt  ",
+		"https://example.com/one.txt",
+		"",
+	}, "\n")
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatalf("failed to write temp subscription file: %v", err)
 	}
-	for _, u := range DefaultSubscriptions {
-		if !strings.HasPrefix(u, "https://") {
-			t.Errorf("expected https URL in default subscriptions, got %q", u)
+
+	urls, err := LoadSubscriptionFile(path)
+	if err != nil {
+		t.Fatalf("LoadSubscriptionFile returned error: %v", err)
+	}
+
+	expected := []string{
+		"https://example.com/one.txt",
+		"https://example.com/two.txt",
+		"https://example.com/three.txt",
+	}
+	if len(urls) != len(expected) {
+		t.Fatalf("expected %d urls, got %d (%v)", len(expected), len(urls), urls)
+	}
+	for i, want := range expected {
+		if urls[i] != want {
+			t.Errorf("urls[%d] = %q, want %q", i, urls[i], want)
 		}
+	}
+}
+
+func TestLoadSubscriptionFileMissing(t *testing.T) {
+	if _, err := LoadSubscriptionFile(filepath.Join(t.TempDir(), "missing.txt")); err == nil {
+		t.Fatal("expected an error for a missing subscription file")
+	}
+}
+
+func TestResolveSubscriptionFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "sub-input.txt")
+	if err := os.WriteFile(path, []byte("https://example.com/one.txt\n"), 0644); err != nil {
+		t.Fatalf("failed to write temp subscription file: %v", err)
+	}
+
+	if got := ResolveSubscriptionFile(path); got != path {
+		t.Errorf("ResolveSubscriptionFile(existing) = %q, want %q", got, path)
+	}
+
+	missing := filepath.Join(dir, "nested", "missing.txt")
+	if got := ResolveSubscriptionFile(missing); got != missing {
+		t.Errorf("ResolveSubscriptionFile(absolute missing) = %q, want %q", got, missing)
 	}
 }
 
@@ -98,6 +149,37 @@ ss://YWVzLTEyOC1nY206cGFzc0AxLjEuMS4xOjQ0Mw==#Node4
 		t.Fatalf("ExtractProxyLinks returned %d links, want %d: %v", len(links), len(expected), links)
 	}
 
+	for i, exp := range expected {
+		if links[i] != exp {
+			t.Errorf("links[%d] = %q, want %q", i, links[i], exp)
+		}
+	}
+}
+
+func TestExtractProxyLinksNewProtocols(t *testing.T) {
+	input := `
+# Comment line
+socks://dXNlcjpwYXNz@1.1.1.1:1080#SOCKS5Node
+socks5://user:pass@2.2.2.2:1080#SOCKS5Plain
+hysteria2://secret@3.3.3.3:443?obfs=salamander&obfs-password=obfs#HY2Node
+hy2://secret@4.4.4.4:443#HY2Alias
+wireguard://privatekey@5.5.5.5:51820?publickey=publickey&address=10.0.0.2/32#WGNode
+wg://privatekey@6.6.6.6:2408?publickey=publickey&address=10.0.0.2/32#WGAlias
+`
+
+	links := ExtractProxyLinks(input)
+	expected := []string{
+		"socks://dXNlcjpwYXNz@1.1.1.1:1080#SOCKS5Node",
+		"socks5://user:pass@2.2.2.2:1080#SOCKS5Plain",
+		"hysteria2://secret@3.3.3.3:443?obfs=salamander&obfs-password=obfs#HY2Node",
+		"hy2://secret@4.4.4.4:443#HY2Alias",
+		"wireguard://privatekey@5.5.5.5:51820?publickey=publickey&address=10.0.0.2/32#WGNode",
+		"wg://privatekey@6.6.6.6:2408?publickey=publickey&address=10.0.0.2/32#WGAlias",
+	}
+
+	if len(links) != len(expected) {
+		t.Fatalf("ExtractProxyLinks returned %d links, want %d: %v", len(links), len(expected), links)
+	}
 	for i, exp := range expected {
 		if links[i] != exp {
 			t.Errorf("links[%d] = %q, want %q", i, links[i], exp)

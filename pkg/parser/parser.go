@@ -2,6 +2,8 @@ package parser
 
 import (
 	"fmt"
+	"net/url"
+	"strconv"
 	"strings"
 
 	"v2pingo/pkg/types"
@@ -15,7 +17,45 @@ func StripRemark(rawLink string) string {
 	return rawLink
 }
 
-// ParseAndConvert parses a raw proxy share link and converts it to a sing-box option.Outbound ProxyConfig.
+// stripSchemePrefix removes one of the provided scheme prefixes from a share
+// link, matching the scheme case-insensitively and returning the remaining body.
+func stripSchemePrefix(rawLink string, schemes ...string) (string, bool) {
+	lower := strings.ToLower(rawLink)
+	for _, scheme := range schemes {
+		if strings.HasPrefix(lower, scheme) {
+			return rawLink[len(scheme):], true
+		}
+	}
+	return rawLink, false
+}
+
+// unescapeUserInfo percent-decodes a share link userinfo component and keeps the
+// original value when it is not valid percent-encoded text.
+func unescapeUserInfo(value string) string {
+	decoded, err := url.PathUnescape(value)
+	if err != nil {
+		return value
+	}
+	return decoded
+}
+
+// splitUserInfo splits a "user:password" userinfo component into its parts.
+func splitUserInfo(value string) (username string, password string) {
+	username, password, _ = strings.Cut(value, ":")
+	return username, password
+}
+
+// parsePortNumber parses a single non-zero TCP/UDP port.
+func parsePortNumber(value string) (uint16, error) {
+	port, err := strconv.ParseUint(strings.TrimSpace(value), 10, 16)
+	if err != nil || port == 0 {
+		return 0, fmt.Errorf("invalid port %q", value)
+	}
+	return uint16(port), nil
+}
+
+// ParseAndConvert parses a raw proxy share link and converts it to a sing-box
+// option.Outbound ProxyConfig (or a sing-box endpoint for WireGuard).
 func ParseAndConvert(rawLink string, index int) (*types.ProxyConfig, error) {
 	trimmed := strings.TrimSpace(rawLink)
 	if trimmed == "" {
@@ -32,6 +72,12 @@ func ParseAndConvert(rawLink string, index int) (*types.ProxyConfig, error) {
 		return parseTrojan(trimmed, index)
 	case strings.HasPrefix(lower, "ss://"):
 		return parseShadowsocks(trimmed, index)
+	case strings.HasPrefix(lower, "socks://"), strings.HasPrefix(lower, "socks5://"):
+		return parseSOCKS(trimmed, index)
+	case strings.HasPrefix(lower, "hysteria2://"), strings.HasPrefix(lower, "hy2://"):
+		return parseHysteria2(trimmed, index)
+	case strings.HasPrefix(lower, "wireguard://"), strings.HasPrefix(lower, "wg://"):
+		return parseWireGuard(trimmed, index)
 	default:
 		return nil, fmt.Errorf("unsupported protocol scheme in link: %s", rawLink)
 	}

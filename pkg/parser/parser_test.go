@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 
 	"v2pingo/pkg/parser"
@@ -281,6 +282,289 @@ func TestParseErrors(t *testing.T) {
 	for _, raw := range invalidLinks {
 		_, err := parser.ParseAndConvert(raw, 1)
 		if err == nil {
+			t.Errorf("expected error for link %q, got nil", raw)
+		}
+	}
+}
+
+func TestParseWireGuard(t *testing.T) {
+	privateKey := base64.StdEncoding.EncodeToString([]byte("private-key-private-key-private-1"))
+	publicKey := base64.StdEncoding.EncodeToString([]byte("public-key-public-key-public-key1"))
+	preSharedKey := base64.StdEncoding.EncodeToString([]byte("preshared-key-preshared-key-pres1"))
+
+	raw := fmt.Sprintf(
+		"wireguard://%s@wg.example.com:51820?publickey=%s&presharedkey=%s&address=10.0.0.2/32&mtu=1420&reserved=1,2,3#WG-Node",
+		privateKey, publicKey, preSharedKey,
+	)
+
+	cfg, err := parser.ParseAndConvert(raw, 7)
+	if err != nil {
+		t.Fatalf("ParseAndConvert WireGuard error: %v", err)
+	}
+
+	if cfg.Protocol != "wireguard" {
+		t.Errorf("expected Protocol wireguard, got %s", cfg.Protocol)
+	}
+	if cfg.Host != "wg.example.com" || cfg.Port != 51820 {
+		t.Errorf("Host/Port mismatch: %s:%d", cfg.Host, cfg.Port)
+	}
+	if cfg.RawLink != raw {
+		t.Errorf("expected RawLink %s, got %s", raw, cfg.RawLink)
+	}
+	if cfg.Endpoint == nil {
+		t.Fatal("expected a WireGuard endpoint, got nil")
+	}
+	if cfg.Endpoint.Type != "wireguard" || cfg.Endpoint.Tag != "proxy" {
+		t.Errorf("endpoint type/tag mismatch: %s/%s", cfg.Endpoint.Type, cfg.Endpoint.Tag)
+	}
+
+	wgOpt, ok := cfg.Endpoint.Options.(*option.WireGuardEndpointOptions)
+	if !ok {
+		t.Fatalf("expected *option.WireGuardEndpointOptions, got %T", cfg.Endpoint.Options)
+	}
+	if wgOpt.PrivateKey != privateKey {
+		t.Errorf("PrivateKey mismatch: %s", wgOpt.PrivateKey)
+	}
+	if wgOpt.MTU != 1420 {
+		t.Errorf("MTU mismatch: %d", wgOpt.MTU)
+	}
+	if len(wgOpt.Address) != 1 || wgOpt.Address[0].String() != "10.0.0.2/32" {
+		t.Errorf("Address mismatch: %v", wgOpt.Address)
+	}
+	if len(wgOpt.Peers) != 1 {
+		t.Fatalf("expected 1 peer, got %d", len(wgOpt.Peers))
+	}
+
+	peer := wgOpt.Peers[0]
+	if peer.Address != "wg.example.com" || peer.Port != 51820 {
+		t.Errorf("peer address mismatch: %s:%d", peer.Address, peer.Port)
+	}
+	if peer.PublicKey != publicKey {
+		t.Errorf("peer PublicKey mismatch: %s", peer.PublicKey)
+	}
+	if peer.PreSharedKey != preSharedKey {
+		t.Errorf("peer PreSharedKey mismatch: %s", peer.PreSharedKey)
+	}
+	if len(peer.AllowedIPs) == 0 {
+		t.Error("expected default allowed IPs to be set")
+	}
+	if len(peer.Reserved) != 3 || peer.Reserved[0] != 1 || peer.Reserved[1] != 2 || peer.Reserved[2] != 3 {
+		t.Errorf("Reserved mismatch: %v", peer.Reserved)
+	}
+}
+
+func TestParseWireGuardBareAddress(t *testing.T) {
+	privateKey := base64.StdEncoding.EncodeToString([]byte("private-key-private-key-private-2"))
+	publicKey := base64.StdEncoding.EncodeToString([]byte("public-key-public-key-public-key2"))
+
+	raw := fmt.Sprintf("wg://%s@1.2.3.4:2408?publickey=%s&address=172.16.0.2#WG-Alias", privateKey, publicKey)
+
+	cfg, err := parser.ParseAndConvert(raw, 8)
+	if err != nil {
+		t.Fatalf("ParseAndConvert WireGuard alias error: %v", err)
+	}
+	if cfg.Endpoint == nil {
+		t.Fatal("expected a WireGuard endpoint, got nil")
+	}
+
+	wgOpt, ok := cfg.Endpoint.Options.(*option.WireGuardEndpointOptions)
+	if !ok {
+		t.Fatalf("expected *option.WireGuardEndpointOptions, got %T", cfg.Endpoint.Options)
+	}
+	if len(wgOpt.Address) != 1 || wgOpt.Address[0].String() != "172.16.0.2/32" {
+		t.Errorf("bare address should be normalized to /32, got %v", wgOpt.Address)
+	}
+	if wgOpt.Peers[0].Reserved != nil {
+		t.Errorf("expected no reserved bytes, got %v", wgOpt.Peers[0].Reserved)
+	}
+}
+
+func TestParseSOCKSBase64UserInfo(t *testing.T) {
+	userInfo := base64.StdEncoding.EncodeToString([]byte("user1:pass1"))
+	raw := fmt.Sprintf("socks://%s@1.2.3.4:1080#SOCKS-Node", userInfo)
+
+	cfg, err := parser.ParseAndConvert(raw, 9)
+	if err != nil {
+		t.Fatalf("ParseAndConvert SOCKS error: %v", err)
+	}
+
+	if cfg.Protocol != "socks" {
+		t.Errorf("expected Protocol socks, got %s", cfg.Protocol)
+	}
+	if cfg.Host != "1.2.3.4" || cfg.Port != 1080 {
+		t.Errorf("Host/Port mismatch: %s:%d", cfg.Host, cfg.Port)
+	}
+	if cfg.Options.Type != "socks" || cfg.Options.Tag != "proxy" {
+		t.Errorf("expected Type socks, Tag proxy; got Type %s, Tag %s", cfg.Options.Type, cfg.Options.Tag)
+	}
+
+	socksOpt, ok := cfg.Options.Options.(*option.SOCKSOutboundOptions)
+	if !ok {
+		t.Fatalf("expected *option.SOCKSOutboundOptions, got %T", cfg.Options.Options)
+	}
+	if socksOpt.Server != "1.2.3.4" || socksOpt.ServerPort != 1080 {
+		t.Errorf("Server/Port mismatch: %s:%d", socksOpt.Server, socksOpt.ServerPort)
+	}
+	if socksOpt.Version != "5" {
+		t.Errorf("Version mismatch: %s", socksOpt.Version)
+	}
+	if socksOpt.Username != "user1" || socksOpt.Password != "pass1" {
+		t.Errorf("credentials mismatch: %s / %s", socksOpt.Username, socksOpt.Password)
+	}
+}
+
+func TestParseSOCKSPlainUserInfo(t *testing.T) {
+	raw := "socks5://user2:pass2@5.6.7.8:1080#SOCKS-Node2"
+
+	cfg, err := parser.ParseAndConvert(raw, 10)
+	if err != nil {
+		t.Fatalf("ParseAndConvert SOCKS5 error: %v", err)
+	}
+
+	socksOpt, ok := cfg.Options.Options.(*option.SOCKSOutboundOptions)
+	if !ok {
+		t.Fatalf("expected *option.SOCKSOutboundOptions, got %T", cfg.Options.Options)
+	}
+	if socksOpt.Server != "5.6.7.8" || socksOpt.ServerPort != 1080 {
+		t.Errorf("Server/Port mismatch: %s:%d", socksOpt.Server, socksOpt.ServerPort)
+	}
+	if socksOpt.Username != "user2" || socksOpt.Password != "pass2" {
+		t.Errorf("credentials mismatch: %s / %s", socksOpt.Username, socksOpt.Password)
+	}
+}
+
+func TestParseHysteria2(t *testing.T) {
+	raw := "hysteria2://mypassword@hy2.example.com:8443?obfs=salamander&obfs-password=obfspass&sni=sni.example.com&insecure=1&up=50&down=120#HY2-Node"
+
+	cfg, err := parser.ParseAndConvert(raw, 11)
+	if err != nil {
+		t.Fatalf("ParseAndConvert Hysteria2 error: %v", err)
+	}
+
+	if cfg.Protocol != "hysteria2" {
+		t.Errorf("expected Protocol hysteria2, got %s", cfg.Protocol)
+	}
+	if cfg.Host != "hy2.example.com" || cfg.Port != 8443 {
+		t.Errorf("Host/Port mismatch: %s:%d", cfg.Host, cfg.Port)
+	}
+	if cfg.Options.Type != "hysteria2" || cfg.Options.Tag != "proxy" {
+		t.Errorf("expected Type hysteria2, Tag proxy; got Type %s, Tag %s", cfg.Options.Type, cfg.Options.Tag)
+	}
+
+	hysteria2Opt, ok := cfg.Options.Options.(*option.Hysteria2OutboundOptions)
+	if !ok {
+		t.Fatalf("expected *option.Hysteria2OutboundOptions, got %T", cfg.Options.Options)
+	}
+	if hysteria2Opt.Server != "hy2.example.com" || hysteria2Opt.ServerPort != 8443 {
+		t.Errorf("Server/Port mismatch: %s:%d", hysteria2Opt.Server, hysteria2Opt.ServerPort)
+	}
+	if hysteria2Opt.Password != "mypassword" {
+		t.Errorf("Password mismatch: %s", hysteria2Opt.Password)
+	}
+	if hysteria2Opt.TLS == nil || !hysteria2Opt.TLS.Enabled {
+		t.Fatal("expected TLS options to be enabled")
+	}
+	if hysteria2Opt.TLS.ServerName != "sni.example.com" {
+		t.Errorf("TLS ServerName mismatch: %s", hysteria2Opt.TLS.ServerName)
+	}
+	if !hysteria2Opt.TLS.Insecure {
+		t.Error("expected insecure TLS to be enabled")
+	}
+	if hysteria2Opt.Obfs == nil || hysteria2Opt.Obfs.Type != "salamander" || hysteria2Opt.Obfs.Password != "obfspass" {
+		t.Errorf("Obfs mismatch: %+v", hysteria2Opt.Obfs)
+	}
+	if hysteria2Opt.UpMbps != 50 || hysteria2Opt.DownMbps != 120 {
+		t.Errorf("bandwidth mismatch: up=%d down=%d", hysteria2Opt.UpMbps, hysteria2Opt.DownMbps)
+	}
+	if len(hysteria2Opt.ServerPorts) != 0 {
+		t.Errorf("expected no port hopping, got %v", hysteria2Opt.ServerPorts)
+	}
+}
+
+func TestParseHysteria2DefaultsAndPortHopping(t *testing.T) {
+	t.Run("userpass auth with default port and mport", func(t *testing.T) {
+		raw := "hy2://user:secret@hy2.example.com/?mport=443-8443#HY2-Hopping"
+
+		cfg, err := parser.ParseAndConvert(raw, 12)
+		if err != nil {
+			t.Fatalf("ParseAndConvert Hysteria2 hopping error: %v", err)
+		}
+
+		hysteria2Opt, ok := cfg.Options.Options.(*option.Hysteria2OutboundOptions)
+		if !ok {
+			t.Fatalf("expected *option.Hysteria2OutboundOptions, got %T", cfg.Options.Options)
+		}
+		if cfg.Port != 443 || hysteria2Opt.ServerPort != 443 {
+			t.Errorf("expected default port 443, got %d", cfg.Port)
+		}
+		if hysteria2Opt.Password != "user:secret" {
+			t.Errorf("expected full userpass auth, got %s", hysteria2Opt.Password)
+		}
+		if len(hysteria2Opt.ServerPorts) != 1 || hysteria2Opt.ServerPorts[0] != "443:8443" {
+			t.Errorf("server_ports mismatch: %v", hysteria2Opt.ServerPorts)
+		}
+	})
+
+	t.Run("multi port authority", func(t *testing.T) {
+		raw := "hysteria2://secret@hy2.example.com:5000,5001-5003#HY2-Multi"
+
+		cfg, err := parser.ParseAndConvert(raw, 13)
+		if err != nil {
+			t.Fatalf("ParseAndConvert Hysteria2 multi port error: %v", err)
+		}
+
+		hysteria2Opt, ok := cfg.Options.Options.(*option.Hysteria2OutboundOptions)
+		if !ok {
+			t.Fatalf("expected *option.Hysteria2OutboundOptions, got %T", cfg.Options.Options)
+		}
+		if cfg.Port != 5000 || hysteria2Opt.ServerPort != 5000 {
+			t.Errorf("expected primary port 5000, got %d", cfg.Port)
+		}
+		expected := []string{"5000:5000", "5001:5003"}
+		if len(hysteria2Opt.ServerPorts) != len(expected) {
+			t.Fatalf("server_ports mismatch: %v", hysteria2Opt.ServerPorts)
+		}
+		for i, want := range expected {
+			if hysteria2Opt.ServerPorts[i] != want {
+				t.Errorf("server_ports[%d] = %s, want %s", i, hysteria2Opt.ServerPorts[i], want)
+			}
+		}
+	})
+}
+
+func TestParseHysteria2PinSHA256(t *testing.T) {
+	pin := strings.Repeat("ab", 32)
+	raw := fmt.Sprintf("hysteria2://secret@1.2.3.4:443?pinSHA256=%s#HY2-Pinned", pin)
+
+	cfg, err := parser.ParseAndConvert(raw, 14)
+	if err != nil {
+		t.Fatalf("ParseAndConvert Hysteria2 pin error: %v", err)
+	}
+
+	hysteria2Opt, ok := cfg.Options.Options.(*option.Hysteria2OutboundOptions)
+	if !ok {
+		t.Fatalf("expected *option.Hysteria2OutboundOptions, got %T", cfg.Options.Options)
+	}
+	if len(hysteria2Opt.TLS.CertificatePublicKeySHA256) != 1 {
+		t.Fatalf("expected a pinned public key hash, got %v", hysteria2Opt.TLS.CertificatePublicKeySHA256)
+	}
+	if len(hysteria2Opt.TLS.CertificatePublicKeySHA256[0]) != 32 {
+		t.Errorf("expected a 32 byte digest, got %d bytes", len(hysteria2Opt.TLS.CertificatePublicKeySHA256[0]))
+	}
+}
+
+func TestParseErrorsNewProtocols(t *testing.T) {
+	invalidLinks := []string{
+		"socks://1.2.3.4",
+		"hysteria2://1.2.3.4:443",
+		"hysteria2://secret@1.2.3.4:443?obfs=unknown&obfs-password=x",
+		"hysteria2://secret@1.2.3.4:0",
+		"wireguard://privatekey@1.2.3.4:51820?publickey=publickey",
+		"wireguard://privatekey@1.2.3.4:51820?address=10.0.0.2/32",
+	}
+
+	for _, raw := range invalidLinks {
+		if _, err := parser.ParseAndConvert(raw, 1); err == nil {
 			t.Errorf("expected error for link %q, got nil", raw)
 		}
 	}
