@@ -7,3 +7,11 @@ https://raw.githubusercontent.com/barry-far/V2ray-Config/main/All_Configs_Sub.tx
 https://github.com/ebrasha/free-v2ray-public-list/blob/main/V2Ray-Config-By-EbraSha-All-Type.txt
 https://raw.githubusercontent.com/MatinGhanbari/v2ray-configs/main/subscriptions/v2ray/all_sub.txt
 https://raw.githubusercontent.com/0xRadikal/Free-v2ray-Configs/main/all/configs.txt
+https://raw.githubusercontent.com/Au1rxx/free-vpn-subscriptions/main/output/by-country/v2ray-base64-JP.txt
+https://raw.githubusercontent.com/Au1rxx/free-vpn-subscriptions/main/output/by-country/v2ray-base64-NL.txt
+https://raw.githubusercontent.com/Au1rxx/free-vpn-subscriptions/main/output/by-country/v2ray-base64-JP.txt
+https://raw.githubusercontent.com/Au1rxx/free-vpn-subscriptions/main/output/by-country/v2ray-base64-US.txt
+https://raw.githubusercontent.com/Alirewa/V2ray-Configs/main/config.txt
+https://raw.githubusercontent.com/morpheusadam/v2ray-config/main/subs/bundles/best.txt
+https://raw.githubusercontent.com/DukeMehdi/FreeList-V2ray-Configs/refs/heads/main/Configs/All-DukeMehdi-Configs.txt
+https://raw.githubusercontent.com/Mr-Meshky/vify/main/configs/all.txt
