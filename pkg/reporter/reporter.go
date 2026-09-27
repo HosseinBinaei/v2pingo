@@ -47,7 +47,7 @@ func (r *Reporter) Record(res types.TestResult) {
 	r.testedCount++
 	if res.Success {
 		r.successCount++
-		if res.StatusCode == 200 && res.Config.RawLink != "" {
+		if res.StatusCode >= 200 && res.StatusCode < 300 && res.Config.RawLink != "" {
 			r.successfulLinks = append(r.successfulLinks, res.Config.RawLink)
 		}
 		if r.out != nil {
@@ -126,7 +126,7 @@ func (r *Reporter) SaveResults() (string, error) {
 		return "", fmt.Errorf("failed to save results to file %s: %w", filename, err)
 	}
 
-	fmt.Fprintf(out, "Saved %d HTTP 200 configuration(s) to %s\n", len(r.successfulLinks), filename)
+	fmt.Fprintf(out, "Saved %d HTTP 2xx configuration(s) to %s\n", len(r.successfulLinks), filename)
 	return filename, nil
 }
 

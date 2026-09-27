@@ -248,7 +248,7 @@ func TestReporter_ProgressClearingBeforeLog(t *testing.T) {
 		t.Fatalf("expected progress string in buffer, got %q", buf.String())
 	}
 
-	// 101st result is a success log
+  // 101st result is a success log
 	r.Record(types.TestResult{
 		Config:     types.ProxyConfig{Index: 101, Protocol: "vless", Host: "1.1.1.1", Port: 443},
 		Success:    true,
@@ -261,5 +261,67 @@ func TestReporter_ProgressClearingBeforeLog(t *testing.T) {
 	expectedLog := "\r\033[K[✓ SUCCESS] [#101] [vless] 1.1.1.1:443 - 50ms (HTTP 200)\n"
 	if !strings.Contains(outStr, expectedLog) {
 		t.Errorf("expected clear line code before log message.\nGot:\n%q\nExpected to contain:\n%q", outStr, expectedLog)
+	}
+}
+
+func TestReporter_SaveResults_AcceptsAll2xx(t *testing.T) {
+	var buf bytes.Buffer
+	r := NewReporter(10, false)
+	r.out = &buf
+
+	cases := []struct {
+		index      int
+		statusCode int
+		success    bool
+		rawLink    string
+		wantSaved  bool
+	}{
+		{1, 200, true, "vless://user@1.1.1.1:443#node200", true},
+		{2, 201, true, "vless://user@1.1.1.2:443#node201", true},
+		{3, 204, true, "vless://user@1.1.1.3:443#node204", true},
+		{4, 206, true, "vless://user@1.1.1.4:443#node206", true},
+		{5, 299, true, "vless://user@1.1.1.5:443#node299", true},
+		{6, 199, true, "vless://user@1.1.1.6:443#node199", false},
+		{7, 300, true, "vless://user@1.1.1.7:443#node300", false},
+		{8, 301, true, "vless://user@1.1.1.8:443#node301", false},
+		{9, 404, true, "vless://user@1.1.1.9:443#node404", false},
+		{10, 201, false, "vless://user@1.1.1.10:443#node201-fail", false},
+	}
+
+	for _, tc := range cases {
+		r.Record(types.TestResult{
+			Config: types.ProxyConfig{
+				Index:    tc.index,
+				Protocol: "vless",
+				Host:     "1.1.1.1",
+				Port:     443,
+				RawLink:  tc.rawLink,
+			},
+			Success:    tc.success,
+			StatusCode: tc.statusCode,
+			Latency:    10 * time.Millisecond,
+		})
+	}
+
+	filename, err := r.SaveResults()
+	if err != nil {
+		t.Fatalf("unexpected error saving results: %v", err)
+	}
+	defer os.Remove(filename)
+
+	content, err := os.ReadFile(filename)
+	if err != nil {
+		t.Fatalf("failed to read saved file: %v", err)
+	}
+
+	got := string(content)
+	for _, tc := range cases {
+		contains := strings.Contains(got, tc.rawLink)
+		if tc.wantSaved && !contains {
+			t.Errorf("expected status %d link %q to be saved, file content:\n%q", tc.statusCode, tc.rawLink, got)
+		}
+		if !tc.wantSaved && contains {
+			t.Errorf("expected status %d link %q NOT to be saved, file content:\n%q", tc.statusCode, tc.rawLink, got)
+		}
 	}
 }
