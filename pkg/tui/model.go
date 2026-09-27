@@ -96,6 +96,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		switch msg.Type {
 		case tea.KeyCtrlC:
+			if m.screen == ScreenRunning {
+				return m.cancelRun()
+			}
 			return m, tea.Quit
 		case tea.KeyTab:
 			if m.screen == ScreenForm {
@@ -127,17 +130,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.inputs[m.focus], cmd = m.inputs[m.focus].Update(msg)
 		}
 		if msg.String() == "q" && m.screen == ScreenRunning {
-			if boundCancel != nil {
-				boundCancel()
-			}
-			partial := DoneMsg{
-				Tested:  m.tested,
-				Success: m.succeeded,
-				Failed:  m.failed,
-				Links:   m.links,
-				Elapsed: time.Since(m.start),
-			}
-			return m, func() tea.Msg { return partial }
+			return m.cancelRun()
+		}
+		if msg.String() == "q" && m.screen == ScreenDone {
+			return m, tea.Quit
 		}
 		return m, cmd
 	case StartTestsMsg:
@@ -175,12 +171,30 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// cancelRun stops the in-flight run and emits a partial DoneMsg carrying the
+// counters and links collected so far. The process stays alive so the
+// background goroutine in run.go can finish and save the partial 2xx links
+// to the results file — the same guarantee the CLI has on Ctrl+C.
+func (m Model) cancelRun() (tea.Model, tea.Cmd) {
+	if boundCancel != nil {
+		boundCancel()
+	}
+	partial := DoneMsg{
+		Tested:  m.tested,
+		Success: m.succeeded,
+		Failed:  m.failed,
+		Links:   m.links,
+		Elapsed: time.Since(m.start),
+	}
+	return m, func() tea.Msg { return partial }
+}
+
 // View renders the active screen. Full styling is a follow-up; this keeps
 // the state machine testable and the screens readable.
 func (m Model) View() string {
 	switch m.screen {
 	case ScreenRunning:
-		return fmt.Sprintf("Testing %d/%d  ok=%d fail=%d\n%s", m.tested, m.total, m.succeeded, m.failed, m.viewport.View())
+		return fmt.Sprintf("Testing %d/%d  ok=%d fail=%d  (Ctrl+C/q=cancel+save)\n%s", m.tested, m.total, m.succeeded, m.failed, m.viewport.View())
 	case ScreenDone:
 		s := fmt.Sprintf("Done: tested=%d success=%d failed=%d in %s\nSaved: %s\n(Enter=form q=quit)", m.tested, m.succeeded, m.failed, m.elapsed.Round(time.Second), m.savedFile)
 		if m.notice != "" {

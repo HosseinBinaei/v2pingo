@@ -117,3 +117,44 @@ func TestModel_PartialDoneMsgShowsNotice(t *testing.T) {
 		t.Fatalf("expected notice in done view, got %q", got.View())
 	}
 }
+
+func TestModel_CtrlCOnRunningCancelsInsteadOfQuitting(t *testing.T) {
+	cancelled := false
+	boundCancel = func() { cancelled = true }
+	defer func() { boundCancel = nil }()
+
+	m := NewModel([]string{"https://a.com/s"}, "https://x.com", 20, 15*time.Second)
+	m.screen = ScreenRunning
+	m.tested, m.succeeded, m.failed = 3, 2, 1
+	m.links = []string{"vless://a#1"}
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	if cmd == nil {
+		t.Fatalf("expected a cmd from Ctrl+C on the running screen")
+	}
+	msg := cmd()
+	if _, isQuit := msg.(tea.QuitMsg); isQuit {
+		t.Fatalf("Ctrl+C on the running screen must cancel (so partial results get saved), not quit the program")
+	}
+	done, ok := msg.(DoneMsg)
+	if !ok {
+		t.Fatalf("expected partial DoneMsg from Ctrl+C, got %T", msg)
+	}
+	if done.Tested != 3 || done.Success != 2 || done.Failed != 1 || len(done.Links) != 1 {
+		t.Fatalf("partial DoneMsg must carry current counters and links, got %+v", done)
+	}
+	if !cancelled {
+		t.Fatalf("expected Ctrl+C to invoke the stored run cancel func")
+	}
+}
+
+func TestModel_QOnDoneQuits(t *testing.T) {
+	m := NewModel([]string{"https://a.com/s"}, "https://x.com", 20, 15*time.Second)
+	m.screen = ScreenDone
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
+	if cmd == nil {
+		t.Fatalf("expected a quit command from q on the done screen (the view advertises q=quit)")
+	}
+	if _, isQuit := cmd().(tea.QuitMsg); !isQuit {
+		t.Fatalf("expected tea.QuitMsg from q on the done screen")
+	}
+}
