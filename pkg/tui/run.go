@@ -18,7 +18,11 @@ import (
 
 // bound is the running program, set by Run before prog.Run() so Update can
 // start the background test goroutine when StartTestsMsg arrives.
+// boundCancel stops the in-flight run (set by startBackgroundRun); the 'q'
+// key in Update calls it so the goroutine below can send a partial DoneMsg.
 var bound *tea.Program
+
+var boundCancel context.CancelFunc
 
 func bindProgram(p *tea.Program) { bound = p }
 
@@ -27,6 +31,10 @@ func Run(subs []string, target string, workers int, timeout time.Duration) error
 	m := NewModel(subs, target, workers, timeout)
 	prog := tea.NewProgram(m)
 	bindProgram(prog)
+	defer func() {
+		bound = nil
+		boundCancel = nil
+	}()
 	_, err := prog.Run()
 	return err
 }
@@ -38,14 +46,16 @@ func startBackgroundRun(prog *tea.Program, cfg FormConfig) {
 		start := time.Now()
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
+		boundCancel = cancel
 		client := &http.Client{Timeout: 30 * time.Second}
 		fctx, fcancel := context.WithTimeout(ctx, 60*time.Second)
 		rawLinks := subscription.FetchSubscriptions(fctx, cfg.Subs, client)
 		fcancel()
 		configs := parser.DeduplicateConfigs(rawLinks)
+		prog.Send(TotalMsg{Total: len(configs)})
 		col := &Collector{}
 		if len(configs) == 0 {
-			prog.Send(DoneMsg{})
+			prog.Send(DoneMsg{Notice: "No valid configs", Elapsed: time.Since(start)})
 			return
 		}
 		tester.RunPool(ctx, configs, cfg.TargetURL, cfg.Workers, cfg.Timeout, func(res types.TestResult) {

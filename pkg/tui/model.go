@@ -32,7 +32,12 @@ type DoneMsg struct {
 	Links     []string
 	SavedFile string
 	Elapsed   time.Duration
+	Notice    string
 }
+
+// TotalMsg carries the deduped config count so the running view can show
+// "Testing x/total" while results stream in.
+type TotalMsg struct{ Total int }
 
 // StartTestsMsg triggers the background fetch+test goroutine.
 type StartTestsMsg struct{ Cfg FormConfig }
@@ -52,6 +57,7 @@ type Model struct {
 	recent    []string
 	savedFile string
 	elapsed   time.Duration
+	notice    string
 	start     time.Time
 	spinner   spinner.Model
 	viewport  viewport.Model
@@ -120,11 +126,27 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.screen == ScreenForm {
 			m.inputs[m.focus], cmd = m.inputs[m.focus].Update(msg)
 		}
+		if msg.String() == "q" && m.screen == ScreenRunning {
+			if boundCancel != nil {
+				boundCancel()
+			}
+			partial := DoneMsg{
+				Tested:  m.tested,
+				Success: m.succeeded,
+				Failed:  m.failed,
+				Links:   m.links,
+				Elapsed: time.Since(m.start),
+			}
+			return m, func() tea.Msg { return partial }
+		}
 		return m, cmd
 	case StartTestsMsg:
 		if bound != nil {
 			startBackgroundRun(bound, msg.Cfg)
 		}
+		return m, nil
+	case TotalMsg:
+		m.total = msg.Total
 		return m, nil
 	case ResultMsg:
 		m.tested++
@@ -147,6 +169,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.screen = ScreenDone
 		m.tested, m.succeeded, m.failed = msg.Tested, msg.Success, msg.Failed
 		m.links, m.savedFile, m.elapsed = msg.Links, msg.SavedFile, msg.Elapsed
+		m.notice = msg.Notice
 		return m, nil
 	}
 	return m, nil
@@ -159,7 +182,11 @@ func (m Model) View() string {
 	case ScreenRunning:
 		return fmt.Sprintf("Testing %d/%d  ok=%d fail=%d\n%s", m.tested, m.total, m.succeeded, m.failed, m.viewport.View())
 	case ScreenDone:
-		return fmt.Sprintf("Done: tested=%d success=%d failed=%d in %s\nSaved: %s\n(Enter=form q=quit)", m.tested, m.succeeded, m.failed, m.elapsed.Round(time.Second), m.savedFile)
+		s := fmt.Sprintf("Done: tested=%d success=%d failed=%d in %s\nSaved: %s\n(Enter=form q=quit)", m.tested, m.succeeded, m.failed, m.elapsed.Round(time.Second), m.savedFile)
+		if m.notice != "" {
+			s += "\n" + m.notice
+		}
+		return s
 	default:
 		var b strings.Builder
 		b.WriteString("v2pingo — Tab moves, Enter starts, Ctrl+C quits\n")

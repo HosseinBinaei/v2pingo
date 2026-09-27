@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"reflect"
 	"testing"
 
 	"v2pingo/pkg/types"
@@ -36,5 +37,9 @@ func TestCollector_KeepsOnly2xxLinks(t *testing.T) {
 	}
 	if len(links) != 3 {
 		t.Fatalf("expected 3 saved links, got %v", links)
+	}
+	want := []string{"vless://a#200", "vless://a#201", "vless://a#299"}
+	if !reflect.DeepEqual(links, want) {
+		t.Fatalf("expected exact 2xx links %v, got %v", want, links)
 	}
 }
