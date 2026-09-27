@@ -2,3 +2,4 @@
 v2pingo.exe
 *.exe
 results*.md
+.worktrees/
