@@ -86,11 +86,14 @@ func TestCLIIntegration(t *testing.T) {
 	if !strings.Contains(outStr, "Fetching subscriptions from 1 sources...") {
 		t.Errorf("output missing fetching line: %s", outStr)
 	}
-	if !strings.Contains(outStr, "Total unique configs to test: 1") {
-		t.Errorf("output missing unique configs line: %s", outStr)
+	if !strings.Contains(outStr, "Extracted 1 raw proxy share links.") {
+		t.Errorf("output missing extracted links line: %s", outStr)
 	}
 	if !strings.Contains(outStr, "TEST SUMMARY") {
 		t.Errorf("output missing TEST SUMMARY: %s", outStr)
+	}
+	if !strings.Contains(outStr, "Healthy links appended to") {
+		t.Errorf("output missing appended results line: %s", outStr)
 	}
 }
 
@@ -131,8 +134,8 @@ func TestCLIIntegrationSubscriptionFile(t *testing.T) {
 	if !strings.Contains(outStr, "Fetching subscriptions from 1 sources...") {
 		t.Errorf("output missing fetching line: %s", outStr)
 	}
-	if !strings.Contains(outStr, "Total unique configs to test: 1") {
-		t.Errorf("output missing unique configs line: %s", outStr)
+	if !strings.Contains(outStr, "Extracted 1 raw proxy share links.") {
+		t.Errorf("output missing extracted links line: %s", outStr)
 	}
 	if !strings.Contains(outStr, "TEST SUMMARY") {
 		t.Errorf("output missing TEST SUMMARY: %s", outStr)

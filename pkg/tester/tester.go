@@ -164,6 +164,7 @@ func RunPool(ctx context.Context, configs []types.ProxyConfig, targetURL string,
 	}
 
 	var wg sync.WaitGroup
+	preTimeout := precheckTimeout(timeout)
 	for i := 0; i < workerCount; i++ {
 		wg.Add(1)
 		go func() {
@@ -175,6 +176,21 @@ func RunPool(ctx context.Context, configs []types.ProxyConfig, targetURL string,
 				case cfg, ok := <-jobs:
 					if !ok {
 						return
+					}
+					// Phase 1 (method A): cheap TCP dial without a box.
+					// Dead nodes fail here and never pay box.New/Start + HTTP cost.
+					if err := TCPPrecheck(ctx, cfg, preTimeout); err != nil {
+						res := types.TestResult{
+							Config:  cfg,
+							Success: false,
+							Error:   err,
+						}
+						select {
+						case <-ctx.Done():
+							return
+						case results <- res:
+						}
+						continue
 					}
 					res := TestProxy(ctx, cfg, targetURL, timeout)
 					select {

@@ -86,9 +86,18 @@ func ParseAndConvert(rawLink string, index int) (*types.ProxyConfig, error) {
 // DeduplicateConfigs parses raw links, removes duplicates based on their stripped URI,
 // and returns normalized ProxyConfig items with 1-based sequential indices.
 func DeduplicateConfigs(rawLinks []string) []types.ProxyConfig {
-	seen := make(map[string]bool)
+	configs, _ := DeduplicateAppend(rawLinks, make(map[string]bool), 1)
+	return configs
+}
+
+// DeduplicateAppend parses one batch of raw links, skipping duplicates already
+// present in seen (shared across batches), and assigns sequential indices
+// starting at startIndex. It returns the batch configs and the next free
+// index, so callers can process arbitrarily large inputs one batch at a time
+// while keeping only a single batch of ProxyConfig values in RAM.
+func DeduplicateAppend(rawLinks []string, seen map[string]bool, startIndex int) ([]types.ProxyConfig, int) {
 	var configs []types.ProxyConfig
-	currentIndex := 1
+	currentIndex := startIndex
 
 	for _, raw := range rawLinks {
 		stripped := StripRemark(raw)
@@ -106,5 +115,5 @@ func DeduplicateConfigs(rawLinks []string) []types.ProxyConfig {
 		currentIndex++
 	}
 
-	return configs
+	return configs, currentIndex
 }

@@ -2,17 +2,12 @@ package tui
 
 import (
 	"context"
-	"fmt"
 	"net/http"
-	"os"
-	"path/filepath"
-	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"v2pingo/pkg/parser"
+	"v2pingo/pkg/runner"
 	"v2pingo/pkg/subscription"
-	"v2pingo/pkg/tester"
 	"v2pingo/pkg/types"
 )
 
@@ -51,24 +46,28 @@ func startBackgroundRun(prog *tea.Program, cfg FormConfig) {
 		fctx, fcancel := context.WithTimeout(ctx, 60*time.Second)
 		rawLinks := subscription.FetchSubscriptions(fctx, cfg.Subs, client)
 		fcancel()
-		configs := parser.DeduplicateConfigs(rawLinks)
-		prog.Send(TotalMsg{Total: len(configs)})
+		resultsFile := runner.DefaultResultsFile()
+		checkpointFile := resultsFile + ".checkpoint"
+		prog.Send(TotalMsg{Total: len(rawLinks)})
 		col := &Collector{}
-		if len(configs) == 0 {
+		if len(rawLinks) == 0 {
 			prog.Send(DoneMsg{Notice: "No valid configs", Elapsed: time.Since(start)})
 			return
 		}
-		tester.RunPool(ctx, configs, cfg.TargetURL, cfg.Workers, cfg.Timeout, func(res types.TestResult) {
+		// Batched run: at most one 5k batch of configs in RAM; healthy links
+		// are appended to resultsFile after each batch with resume support.
+		_ = runner.RunBatches(ctx, rawLinks, runner.BatchConfig{
+			TargetURL:      cfg.TargetURL,
+			Concurrency:    cfg.Workers,
+			Timeout:        cfg.Timeout,
+			BatchSize:      runner.DefaultBatchSize,
+			ResultsFile:    resultsFile,
+			CheckpointFile: checkpointFile,
+		}, func(res types.TestResult) {
 			col.OnResult(res)
 			prog.Send(ResultMsg{Res: res})
 		})
 		tested, okCount, failCount, links := col.Snapshot()
-		saved := ""
-		if len(links) > 0 {
-			_ = os.MkdirAll("results", 0755)
-			saved = filepath.Join("results", fmt.Sprintf("results_%s.md", time.Now().Format("20060102_150405")))
-			_ = os.WriteFile(saved, []byte(strings.Join(links, "\n")+"\n"), 0644)
-		}
-		prog.Send(DoneMsg{Tested: tested, Success: okCount, Failed: failCount, Links: links, SavedFile: saved, Elapsed: time.Since(start)})
+		prog.Send(DoneMsg{Tested: tested, Success: okCount, Failed: failCount, Links: links, SavedFile: resultsFile, Elapsed: time.Since(start)})
 	}()
 }

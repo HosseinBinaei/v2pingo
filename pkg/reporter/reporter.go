@@ -33,6 +33,36 @@ func NewReporter(totalConfigs int, verbose bool) *Reporter {
 	}
 }
 
+// IsSavable reports whether a result qualifies for the results file,
+// mirroring the architecture rule: successful HTTP 2xx with a raw link.
+func IsSavable(res types.TestResult) bool {
+	return res.Success && res.StatusCode >= 200 && res.StatusCode < 300 && res.Config.RawLink != ""
+}
+
+// AppendLinks appends raw proxy links to the results file, creating the
+// parent directory on demand. It is the incremental-write primitive behind
+// batched runs: each completed batch flushes only its own healthy links.
+func AppendLinks(filename string, links []string) error {
+	if len(links) == 0 {
+		return nil
+	}
+	if dir := filepath.Dir(filename); dir != "" {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return fmt.Errorf("failed to create results directory: %w", err)
+		}
+	}
+	f, err := os.OpenFile(filename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return fmt.Errorf("failed to open results file %s: %w", filename, err)
+	}
+	defer f.Close()
+	for _, link := range links {
+		if _, err := f.WriteString(link + "\n"); err != nil {
+			return fmt.Errorf("failed to append results to file %s: %w", filename, err)
+		}
+	}
+	return nil
+}
 func (r *Reporter) clearProgressLine() {
 	if r.progressActive && r.out != nil {
 		fmt.Fprint(r.out, "\r\033[K")
@@ -47,7 +77,7 @@ func (r *Reporter) Record(res types.TestResult) {
 	r.testedCount++
 	if res.Success {
 		r.successCount++
-		if res.StatusCode >= 200 && res.StatusCode < 300 && res.Config.RawLink != "" {
+		if IsSavable(res) {
 			r.successfulLinks = append(r.successfulLinks, res.Config.RawLink)
 		}
 		if r.out != nil {

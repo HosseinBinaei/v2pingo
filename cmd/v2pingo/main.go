@@ -11,10 +11,9 @@ import (
 	"syscall"
 	"time"
 
-	"v2pingo/pkg/parser"
 	"v2pingo/pkg/reporter"
+	"v2pingo/pkg/runner"
 	"v2pingo/pkg/subscription"
-	"v2pingo/pkg/tester"
 )
 
 // stringSliceFlag supports repeatable -sub flags and comma-separated values.
@@ -38,6 +37,7 @@ func main() {
 	targetURLFlag := flag.String("url", "https://x.com", "Target test URL")
 	concurrencyFlag := flag.Int("c", 20, "Concurrency workers")
 	timeoutFlag := flag.Duration("timeout", 15*time.Second, "Test timeout duration")
+	batchFlag := flag.Int("batch", runner.DefaultBatchSize, "Configs parsed/tested per batch (bounds RAM)")
 	defaultSubsFlag := flag.Bool("default-subs", true, "Include the subscription URLs listed in the sub-input file")
 	subFileFlag := flag.String("sub-file", subscription.DefaultSubscriptionFile, "Path to the subscription list file (one URL per line)")
 	var verboseFlag bool
@@ -91,10 +91,7 @@ func main() {
 
 	fmt.Printf("Extracted %d raw proxy share links.\n", len(rawLinks))
 
-	configs := parser.DeduplicateConfigs(rawLinks)
-	fmt.Printf("Total unique configs to test: %d\n", len(configs))
-
-	if len(configs) == 0 {
+	if len(rawLinks) == 0 {
 		fmt.Fprintln(os.Stderr, "No valid proxy configurations found to test.")
 		os.Exit(0)
 	}
@@ -102,16 +99,26 @@ func main() {
 	rootCtx, rootCancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer rootCancel()
 
-	rep := reporter.NewReporter(len(configs), verboseFlag)
+	rep := reporter.NewReporter(len(rawLinks), verboseFlag)
+	resultsFile := runner.DefaultResultsFile()
+	checkpointFile := resultsFile + ".checkpoint"
 
 	startTime := time.Now()
-	tester.RunPool(rootCtx, configs, *targetURLFlag, *concurrencyFlag, *timeoutFlag, rep.Record)
+	err := runner.RunBatches(rootCtx, rawLinks, runner.BatchConfig{
+		TargetURL:      *targetURLFlag,
+		Concurrency:    *concurrencyFlag,
+		Timeout:        *timeoutFlag,
+		BatchSize:      *batchFlag,
+		ResultsFile:    resultsFile,
+		CheckpointFile: checkpointFile,
+	}, rep.Record)
 	duration := time.Since(startTime)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error running batches: %v\n", err)
+	}
 
 	rep.PrintSummary(duration)
-	if _, err := rep.SaveResults(); err != nil {
-		fmt.Fprintf(os.Stderr, "Error saving results: %v\n", err)
-	}
+	fmt.Printf("Healthy links appended to %s (checkpoint: %s)\n", resultsFile, checkpointFile)
 }
 
 func isTerminal() bool {
