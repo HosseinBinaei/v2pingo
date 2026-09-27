@@ -35,7 +35,7 @@ type DoneMsg struct {
 }
 
 // StartTestsMsg triggers the background fetch+test goroutine.
-type StartTestsMsg struct{}
+type StartTestsMsg struct{ Cfg FormConfig }
 
 // Model is the single BubbleTea model for form, running, and done screens.
 type Model struct {
@@ -108,8 +108,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.formErr = ""
 				m.screen = ScreenRunning
 				m.start = time.Now()
-				_ = cfg
-				return m, func() tea.Msg { return StartTestsMsg{} }
+				return m, func() tea.Msg { return StartTestsMsg{Cfg: cfg} }
 			}
 			if m.screen == ScreenDone {
 				m.screen = ScreenForm
@@ -122,6 +121,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.inputs[m.focus], cmd = m.inputs[m.focus].Update(msg)
 		}
 		return m, cmd
+	case StartTestsMsg:
+		if bound != nil {
+			startBackgroundRun(bound, msg.Cfg)
+		}
+		return m, nil
 	case ResultMsg:
 		m.tested++
 		if msg.Res.Success {

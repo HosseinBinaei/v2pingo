@@ -46,8 +46,20 @@ func main() {
 
 	var subFlags stringSliceFlag
 	flag.Var(&subFlags, "sub", "Custom subscription URL (repeatable or comma-separated)")
+	tuiFlag := flag.Bool("tui", true, "Launch interactive terminal UI")
 
 	flag.Parse()
+
+	if *tuiFlag && isTerminal() {
+		subFilePath := subscription.ResolveSubscriptionFile(*subFileFlag)
+		fileSubs, _ := subscription.LoadSubscriptionFile(subFilePath)
+		allSubs := append(append([]string{}, fileSubs...), subFlags...)
+		if err := runTUI(allSubs, *targetURLFlag, *concurrencyFlag, *timeoutFlag); err != nil {
+			fmt.Fprintf(os.Stderr, "TUI error: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
 
 	// Assemble subscription URL list
 	var subURLs []string
@@ -100,4 +112,12 @@ func main() {
 	if _, err := rep.SaveResults(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error saving results: %v\n", err)
 	}
+}
+
+func isTerminal() bool {
+	fi, err := os.Stdout.Stat()
+	if err != nil {
+		return false
+	}
+	return (fi.Mode() & os.ModeCharDevice) != 0
 }
