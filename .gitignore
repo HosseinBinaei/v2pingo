@@ -1,5 +1,23 @@
+# Tool workspaces
 .superpowers/
+.kilo/
+.worktrees/
+
+# Build output
+/v2pingo
 v2pingo.exe
 *.exe
+
+# Test / run output
+results/
 results*.md
-.worktrees/
+*.out
+
+# Editor / IDE
+.vscode/
+.idea/
+
+# OS junk
+.DS_Store
+Thumbs.db
+desktop.ini
