@@ -12,6 +12,7 @@ v2pingo.exe
 results/
 results*.md
 *.out
+type-of-results/
 
 # Editor / IDE
 .vscode/
