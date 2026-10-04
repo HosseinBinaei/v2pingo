@@ -21,3 +21,6 @@ results*.md
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# Agent
+.freebuff/
