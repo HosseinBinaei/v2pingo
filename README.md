@@ -31,10 +31,11 @@ Built in Go for Windows (single runnable `.exe`), it tests configurations direct
   - Real-time live status updates without leaking credentials, passwords, UUIDs, or Reality keys.
   - Optional verbose mode (`-v` / `-verbose`) for inspecting failures.
   - Graceful shutdown on `Ctrl+C` (`SIGINT` / `SIGTERM`) that halts workers safely and prints a summary for completed tests.
-- **Shareable Results:**
-  - After the results file is written, it is uploaded to [paste.rs](https://paste.rs) and the returned link is printed (both in the CLI and on the TUI done screen).
-  - Disable publishing with `-paste=false`, or point it at another paste service with `-paste-url`.
-  - Empty runs (no HTTP 2xx configurations) are skipped, so no link is produced and no request is sent.
+- **Opt-In Shareable Results:**
+  - Once the results file is written, the tool asks whether to upload it to [paste.rs](https://paste.rs) — answering `y` / `yes` uploads it and prints the link, any other answer simply keeps the local file.
+  - The question is only asked when a results file with healthy configurations actually exists; empty runs save nothing and are never asked about.
+  - Skip the question entirely with `-paste=false`, or point it at another paste service with `-paste-url`.
+  - The TUI shows the same question on its done screen (`y` uploads, any other key skips).
 
 ---
 
@@ -91,20 +92,23 @@ Show failed tests in addition to successful ones:
 .\v2pingo.exe -v
 ```
 
-### 6. Publishing Results
-By default, the saved results file is uploaded to `paste.rs` once the run finishes and the link is printed:
+### 6. Publishing Results (Opt-In)
+Once the results file is saved, `v2pingo` asks before publishing anything:
 ```text
 Saved 42 HTTP 2xx configuration(s) to results\results_20261009_183039.md
+Upload the saved results to paste.rs and get a shareable link? [y/N]: y
 Paste link: https://paste.rs/AbCdE
 ```
 
-Disable the upload, or send it to another paste service that follows the same API:
+Answer `y`, `Y`, `yes`, `YES` or `Yes` to upload; **anything else** (including just pressing Enter, or running non-interactively) keeps the results local and prints `Skipped paste upload.`
+
+Skip the question altogether, or send it to another paste service that follows the same API:
 ```powershell
 .\v2pingo.exe -paste=false
 .\v2pingo.exe -paste-url "https://my-paste.example.com/"
 ```
 
-> The uploaded file contains working proxy share links (credentials included). Publishing is enabled by default as requested, but the link is public — keep `-paste=false` when the results must stay private.
+> The uploaded file contains working proxy share links (credentials included) and the paste link is public, so only answer yes when you intend to share them.
 
 ---
 
@@ -133,7 +137,7 @@ Add or remove lines to change which subscriptions are fetched — every remainin
 | `-sub-file` | `string` | `sub-input.txt` | Path to the subscription list file (one URL per line). |
 | `-sub` | `string` | *(empty)* | Custom subscription URL(s) (repeatable or comma-separated). |
 | `-v`, `-verbose` | `bool` | `false` | Enable verbose output (prints failed tests). |
-| `-paste` | `bool` | `true` | Upload the saved results file to the paste service and print the link. |
+| `-paste` | `bool` | `true` | Ask whether to upload the saved results file to the paste service (`false` never asks). |
 | `-paste-url` | `string` | `https://paste.rs/` | Paste service endpoint used when `-paste` is enabled. |
 
 ---
@@ -152,13 +156,14 @@ Add or remove lines to change which subscriptions are fetched — every remainin
 [✗ FAILED] [#15] [vless] 198.51.100.2:443 - context deadline exceeded
 ```
 
-### Paste Upload
+### Paste Upload (Opt-In)
 ```text
 Saved 42 HTTP 2xx configuration(s) to results\results_20261009_183039.md
+Upload the saved results to paste.rs and get a shareable link? [y/N]: y
 Paste link: https://paste.rs/AbCdE
 ```
 
-On the TUI's done screen the same link is shown as a `Paste:` line.
+Any other answer prints `Skipped paste upload.` and nothing is sent. On the TUI's done screen the same question is answered with a single key (`y` = upload, any other key = skip) and the link appears as a `Paste:` line.
 
 ### Final Summary
 ```text
@@ -213,7 +218,7 @@ sub-input.txt (one URL per line) + custom -sub URLs
  [Reporter & Sanitizer]  ──► Live progress & final summary
        │
        ▼
- [Paste Publisher]       ──► POST results_*.md to paste.rs, print the short link
+ [Paste Publisher]       ──► On "yes": POST results_*.md to paste.rs, print the link
 ```
 
 ---

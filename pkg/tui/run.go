@@ -14,11 +14,18 @@ import (
 
 // Options holds run settings that are not part of the interactive form.
 type Options struct {
-	// Paste uploads the saved results file to the paste service when the run
-	// finishes, and surfaces the link on the done screen.
-	Paste bool
+	// AskPaste offers the "upload to paste.rs?" question on the done screen.
+	// The upload only happens when the user answers yes, so a run can never
+	// publish results without an explicit confirmation.
+	AskPaste bool
 	// PasteEndpoint overrides the paste service URL; empty means paste.rs.
 	PasteEndpoint string
+}
+
+// PasteDoneMsg carries the outcome of an on-demand paste upload.
+type PasteDoneMsg struct {
+	Link string
+	Err  error
 }
 
 // bound is the running program, set by Run before prog.Run() so Update can
@@ -47,7 +54,7 @@ func Run(subs []string, target string, workers int, timeout time.Duration, opts 
 
 // startBackgroundRun executes fetch -> dedupe -> RunPool off the UI thread
 // and forwards every result with prog.Send (goroutine-safe in BubbleTea).
-func startBackgroundRun(prog *tea.Program, cfg FormConfig, opts Options) {
+func startBackgroundRun(prog *tea.Program, cfg FormConfig) {
 	go func() {
 		start := time.Now()
 		ctx, cancel := context.WithCancel(context.Background())
@@ -79,24 +86,18 @@ func startBackgroundRun(prog *tea.Program, cfg FormConfig, opts Options) {
 			prog.Send(ResultMsg{Res: res})
 		})
 		tested, okCount, failCount, links := col.Snapshot()
-		pasteLink, pasteErr := publishResults(opts, resultsFile)
-		notice := ""
-		if pasteErr != nil {
-			notice = "paste upload failed: " + pasteErr.Error()
-		}
-		prog.Send(DoneMsg{Tested: tested, Success: okCount, Failed: failCount, Links: links, SavedFile: resultsFile, PasteLink: pasteLink, Elapsed: time.Since(start), Notice: notice})
+		prog.Send(DoneMsg{Tested: tested, Success: okCount, Failed: failCount, Links: links, SavedFile: resultsFile, Elapsed: time.Since(start)})
 	}()
 }
 
-// publishResults uploads the saved results file when publishing is enabled and
-// returns the paste link. A missing or empty results file yields an empty link
-// and no error, so an unproductive run is not reported as an upload failure.
-func publishResults(opts Options, resultsFile string) (string, error) {
-	if !opts.Paste {
-		return "", nil
+// uploadResults returns a command that publishes path to the paste service off
+// the UI thread. The user triggers it explicitly from the done screen; a
+// missing or empty file resolves to an empty link and no error.
+func uploadResults(path, endpoint string) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+		link, err := paste.NewClient(endpoint).UploadFile(ctx, path)
+		return PasteDoneMsg{Link: link, Err: err}
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	defer cancel()
-
-	return paste.NewClient(opts.PasteEndpoint).UploadFile(ctx, resultsFile)
 }

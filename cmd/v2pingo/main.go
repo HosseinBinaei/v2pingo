@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"flag"
 	"fmt"
@@ -49,7 +50,7 @@ func main() {
 	var subFlags stringSliceFlag
 	flag.Var(&subFlags, "sub", "Custom subscription URL (repeatable or comma-separated)")
 	tuiFlag := flag.Bool("tui", true, "Launch interactive terminal UI")
-	pasteFlag := flag.Bool("paste", true, "Upload the saved results file to paste.rs and print the link")
+	pasteFlag := flag.Bool("paste", true, "Ask whether to upload the saved results file to paste.rs")
 	pasteURLFlag := flag.String("paste-url", paste.DefaultEndpoint, "Paste service endpoint used by -paste")
 
 	flag.Parse()
@@ -59,7 +60,7 @@ func main() {
 		fileSubs, _ := subscription.LoadSubscriptionFile(subFilePath)
 		allSubs := append(append([]string{}, fileSubs...), subFlags...)
 		if err := runTUI(allSubs, *targetURLFlag, *concurrencyFlag, *timeoutFlag, tui.Options{
-			Paste:         *pasteFlag,
+			AskPaste:      *pasteFlag,
 			PasteEndpoint: *pasteURLFlag,
 		}); err != nil {
 			fmt.Fprintf(os.Stderr, "TUI error: %v\n", err)
@@ -128,14 +129,30 @@ func main() {
 	fmt.Printf("Healthy links appended to %s (checkpoint: %s)\n", resultsFile, checkpointFile)
 
 	if *pasteFlag {
-		uploadResultsFile(resultsFile, *pasteURLFlag)
+		promptPasteUpload(resultsFile, *pasteURLFlag)
 	}
 }
 
-// uploadResultsFile publishes the saved results file to the paste service and
-// prints the resulting link. A failed or unnecessary upload is reported as a
-// warning so it never turns a completed test run into a failure.
-func uploadResultsFile(path, endpoint string) {
+// promptPasteUpload asks the user whether to publish the saved results file and
+// uploads it only on an affirmative answer (y / yes, any case). Anything else —
+// including an empty answer or EOF — keeps the run local and skips the upload,
+// so a non-interactive run never blocks or publishes by accident.
+func promptPasteUpload(path, endpoint string) {
+	if _, err := os.Stat(path); err != nil {
+		return // no results file was saved, nothing to publish
+	}
+
+	fmt.Print(paste.Prompt)
+	answer, err := bufio.NewReader(os.Stdin).ReadString('\n')
+	if err != nil {
+		// EOF or a missing trailing newline: keep the next line separate.
+		fmt.Println()
+	}
+	if !paste.IsAffirmative(answer) {
+		fmt.Println("Skipped paste upload.")
+		return
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
@@ -145,6 +162,7 @@ func uploadResultsFile(path, endpoint string) {
 		return
 	}
 	if link == "" {
+		fmt.Println("Skipped paste upload.")
 		return
 	}
 	fmt.Printf("Paste link: %s\n", link)

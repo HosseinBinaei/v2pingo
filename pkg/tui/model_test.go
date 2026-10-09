@@ -1,11 +1,13 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"v2pingo/pkg/paste"
 	"v2pingo/pkg/types"
 )
 
@@ -105,16 +107,124 @@ func TestModel_QCancelsRunWithoutQuitting(t *testing.T) {
 	}
 }
 
-func TestModel_DoneMsgShowsPasteLink(t *testing.T) {
+// newSavedRunModel returns a done-screen model that just finished a run which
+// saved one healthy link, with paste asking enabled.
+func newSavedRunModel() Model {
 	m := NewModel([]string{"https://a.com/s"}, "https://x.com", 20, 15*time.Second)
+	m.opts = Options{AskPaste: true}
 	m.screen = ScreenRunning
-	next, _ := m.Update(DoneMsg{Tested: 5, Success: 2, Failed: 3, SavedFile: "results/x.md", PasteLink: "https://paste.rs/abc"})
-	got := next.(Model)
-	if got.pasteLink != "https://paste.rs/abc" {
-		t.Fatalf("expected paste link to be stored, got %q", got.pasteLink)
+	next, _ := m.Update(DoneMsg{Tested: 5, Success: 2, Failed: 3, SavedFile: "results/x.md", Links: []string{"vless://a#1"}})
+	return next.(Model)
+}
+
+func TestModel_DoneMsgAsksBeforePasting(t *testing.T) {
+	got := newSavedRunModel()
+	if !got.pastePrompt {
+		t.Fatalf("expected the paste question to be pending after a saved run")
 	}
-	if !strings.Contains(got.View(), "https://paste.rs/abc") {
-		t.Fatalf("expected paste link in done view, got %q", got.View())
+	if got.pasteLink != "" {
+		t.Fatalf("no upload may happen before the user answers, got %q", got.pasteLink)
+	}
+	if !strings.Contains(got.View(), paste.Prompt) {
+		t.Fatalf("expected the paste question in the done view, got %q", got.View())
+	}
+}
+
+func TestModel_NonYesAnswerSkipsPasteUpload(t *testing.T) {
+	for _, answer := range []string{"n", "N", "x", "1", " "} {
+		next, cmd := newSavedRunModel().Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(answer)})
+		res := next.(Model)
+		if res.pastePrompt {
+			t.Errorf("answer %q must resolve the prompt", answer)
+		}
+		if res.pasteUploading || res.pasteLink != "" {
+			t.Errorf("answer %q must not start an upload (uploading=%v link=%q)", answer, res.pasteUploading, res.pasteLink)
+		}
+		if cmd != nil {
+			t.Errorf("answer %q must not return an upload command", answer)
+		}
+	}
+}
+
+func TestModel_YesAnswerStartsPasteUpload(t *testing.T) {
+	for _, answer := range []string{"y", "Y"} {
+		got := newSavedRunModel()
+		next, cmd := got.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(answer)})
+		res := next.(Model)
+		if res.pastePrompt {
+			t.Errorf("answer %q must resolve the prompt", answer)
+		}
+		if !res.pasteUploading {
+			t.Errorf("answer %q must start the upload", answer)
+		}
+		if cmd == nil {
+			t.Errorf("answer %q must return an upload command", answer)
+		}
+		if !strings.Contains(res.View(), "Uploading") {
+			t.Errorf("expected an uploading state in the view, got %q", res.View())
+		}
+	}
+}
+
+func TestModel_PasteDoneMsgShowsLink(t *testing.T) {
+	got := newSavedRunModel()
+	pressed, _ := got.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+	next, _ := pressed.(Model).Update(PasteDoneMsg{Link: "https://paste.rs/abc"})
+	res := next.(Model)
+	if res.pasteUploading {
+		t.Fatalf("upload must be finished after PasteDoneMsg")
+	}
+	if res.pasteLink != "https://paste.rs/abc" {
+		t.Fatalf("expected the paste link to be stored, got %q", res.pasteLink)
+	}
+	if !strings.Contains(res.View(), "https://paste.rs/abc") {
+		t.Fatalf("expected paste link in done view, got %q", res.View())
+	}
+}
+
+func TestModel_PasteDoneMsgFailureShowsNotice(t *testing.T) {
+	got := newSavedRunModel()
+	next, _ := got.Update(PasteDoneMsg{Err: fmt.Errorf("boom")})
+	res := next.(Model)
+	if res.pasteLink != "" {
+		t.Fatalf("a failed upload must not produce a link, got %q", res.pasteLink)
+	}
+	if !strings.Contains(res.View(), "boom") {
+		t.Fatalf("expected the failure reason in the view, got %q", res.View())
+	}
+}
+
+func TestModel_NoPasteQuestionWithoutSavedResults(t *testing.T) {
+	cases := []struct {
+		name string
+		opts Options
+		msg  DoneMsg
+	}{
+		{"asking disabled", Options{AskPaste: false}, DoneMsg{SavedFile: "results/x.md", Links: []string{"vless://a#1"}}},
+		{"no healthy links", Options{AskPaste: true}, DoneMsg{SavedFile: "results/x.md"}},
+		{"interrupted partial", Options{AskPaste: true}, DoneMsg{Links: []string{"vless://a#1"}}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := NewModel([]string{"https://a.com/s"}, "https://x.com", 20, 15*time.Second)
+			m.opts = tc.opts
+			m.screen = ScreenRunning
+			next, _ := m.Update(tc.msg)
+			if got := next.(Model); got.pastePrompt {
+				t.Fatalf("expected no paste question for case %q", tc.name)
+			}
+		})
+	}
+}
+
+func TestModel_QOnDoneWhilePromptPendingQuits(t *testing.T) {
+	got := newSavedRunModel()
+	_, cmd := got.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
+	if cmd == nil {
+		t.Fatal("expected q to quit even while the paste question is pending")
+	}
+	if _, isQuit := cmd().(tea.QuitMsg); !isQuit {
+		t.Fatal("expected tea.QuitMsg from q while the paste question is pending")
 	}
 }
 

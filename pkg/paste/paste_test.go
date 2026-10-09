@@ -121,6 +121,22 @@ func TestUploadFile_PropagatesTransportError(t *testing.T) {
 	}
 }
 
+func TestIsAffirmative(t *testing.T) {
+	yes := []string{"y", "Y", "yes", "YES", "Yes", "yEs", "  y  ", "\r\ny\n"}
+	for _, answer := range yes {
+		if !IsAffirmative(answer) {
+			t.Errorf("expected %q to be affirmative", answer)
+		}
+	}
+
+	no := []string{"", " ", "n", "N", "no", "NO", "nope", "yeah", "1", "true", "yy"}
+	for _, answer := range no {
+		if IsAffirmative(answer) {
+			t.Errorf("expected %q to be non-affirmative", answer)
+		}
+	}
+}
+
 func TestNewClient_DefaultsEndpoint(t *testing.T) {
 	if got := NewClient("").Endpoint; got != DefaultEndpoint {
 		t.Errorf("expected default endpoint %q, got %q", DefaultEndpoint, got)

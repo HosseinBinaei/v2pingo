@@ -185,8 +185,9 @@ func serveSOCKS5(ln net.Listener) {
 }
 
 // TestCLIIntegrationPastesResults exercises the full requested flow against a
-// mock paste service: a healthy config is saved to the results file after the
-// run, the file is uploaded, and the returned link is printed.
+// mock paste service: once a healthy config is saved to the results file, the
+// program asks whether to publish it, an affirmative answer uploads the file,
+// and the returned link is printed.
 func TestCLIIntegrationPastesResults(t *testing.T) {
 	var mu sync.Mutex
 	var pastedBody string
@@ -238,6 +239,8 @@ func TestCLIIntegrationPastesResults(t *testing.T) {
 	)
 	// Isolate the results/ directory so the test does not pollute the repo.
 	cmd.Dir = tmpDir
+	// Answer the paste confirmation prompt with an explicit yes.
+	cmd.Stdin = strings.NewReader("y\n")
 
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -245,6 +248,9 @@ func TestCLIIntegrationPastesResults(t *testing.T) {
 	}
 	outStr := string(out)
 
+	if !strings.Contains(outStr, "Upload the saved results to paste.rs") {
+		t.Errorf("expected the paste confirmation prompt, got:\n%s", outStr)
+	}
 	if !strings.Contains(outStr, "Paste link: https://paste.rs/xyz789") {
 		t.Errorf("expected the paste link to be printed, got:\n%s", outStr)
 	}
@@ -255,6 +261,75 @@ func TestCLIIntegrationPastesResults(t *testing.T) {
 	}
 	if !strings.Contains(pastedBody, proxyLink) {
 		t.Errorf("expected the uploaded body to contain the healthy config %q, got: %q", proxyLink, pastedBody)
+	}
+}
+
+// TestCLIIntegrationPasteDeclined verifies that any answer other than y/yes
+// keeps the results local: no upload, no link.
+func TestCLIIntegrationPasteDeclined(t *testing.T) {
+	var mu sync.Mutex
+	pasteHits := 0
+	pasteSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		pasteHits++
+		mu.Unlock()
+		w.WriteHeader(http.StatusCreated)
+		fmt.Fprintln(w, "https://paste.rs/should-not-happen")
+	}))
+	defer pasteSrv.Close()
+
+	targetSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer targetSrv.Close()
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to start the local SOCKS5 proxy: %v", err)
+	}
+	defer ln.Close()
+	go serveSOCKS5(ln)
+
+	subSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprintln(w, "socks5://"+ln.Addr().String()+"#local")
+	}))
+	defer subSrv.Close()
+
+	tmpDir := t.TempDir()
+	binPath := filepath.Join(tmpDir, "v2pingo_paste_decline_test.exe")
+	buildCmd := exec.Command(goExecutable(), "build", "-o", binPath, ".")
+	if buildOut, err := buildCmd.CombinedOutput(); err != nil {
+		t.Fatalf("failed to build test binary: %v\nOutput: %s", err, string(buildOut))
+	}
+
+	cmd := exec.Command(binPath,
+		"-default-subs=false",
+		"-sub", subSrv.URL,
+		"-url", targetSrv.URL,
+		"-c", "1",
+		"-timeout", "10s",
+		"-paste-url", pasteSrv.URL,
+	)
+	cmd.Dir = tmpDir
+	cmd.Stdin = strings.NewReader("n\n")
+
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("binary execution failed: %v\nOutput: %s", err, string(out))
+	}
+	outStr := string(out)
+
+	if strings.Contains(outStr, "Paste link:") {
+		t.Errorf("declined run must not print a paste link, got:\n%s", outStr)
+	}
+	if !strings.Contains(outStr, "Skipped paste upload.") {
+		t.Errorf("expected a skipped-upload notice, got:\n%s", outStr)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if pasteHits != 0 {
+		t.Errorf("declined run must not upload anything, got %d upload(s)", pasteHits)
 	}
 }
 

@@ -114,21 +114,24 @@ The file contains the working proxy configurations saved as original share links
 
 ---
 
-## 9. Shareable Link (paste.rs)
+## 9. Shareable Link (paste.rs) — asks first
 
-As soon as the results file is saved, `v2pingo` uploads it to [paste.rs](https://paste.rs) and prints the link:
+Once the results file is saved, `v2pingo` **asks** whether you want a shareable link:
 
 ```text
 Saved 42 HTTP 2xx configuration(s) to results/results_20261009_183039.md
+Upload the saved results to paste.rs and get a shareable link? [y/N]: y
 Paste link: https://paste.rs/AbCdE
 ```
 
-In the TUI the same link appears on the done screen as a `Paste:` line.
+Answer `y`, `Y`, `yes`, `YES` or `Yes` to upload the file to [paste.rs](https://paste.rs) and get the link. **Any other answer** — `n`, Enter, a random word, or running without an interactive prompt — keeps the results on your machine and prints `Skipped paste upload.`
+
+In the TUI the same question appears on the done screen: press `y` to upload, any other key to skip, and the link is then shown as a `Paste:` line.
 
 Details:
 
-* If the run found no HTTP 2xx configuration, no results file is created and the upload is skipped (no link, no request).
-* Disable publishing for a run with `-paste=false`.
+* If the run found no HTTP 2xx configuration, no results file is created and the question is never asked.
+* Skip the question for a run with `-paste=false`.
 * Point the upload at another service that follows the same API with `-paste-url`:
 
 ```powershell
@@ -136,7 +139,7 @@ Details:
 .\v2pingo.exe -paste-url "https://my-paste.example.com/"
 ```
 
-> **Privacy note:** the uploaded file contains working proxy share links, credentials included, and the paste link is public. Use `-paste=false` when the results must stay private.
+> **Privacy note:** the uploaded file contains working proxy share links, credentials included, and the paste link is public. Only answer yes when you really want to share them; `-paste=false` never asks.
 
 ---
 
@@ -147,7 +150,7 @@ Pressing **Ctrl+C** during a test run will:
 * Cancel ongoing worker tests gracefully
 * Preserve results from all completed tests
 * Save configurations that received HTTP 200 to the results file
-* Upload the partial results file to `paste.rs` and print the link
+* Ask whether to upload the saved results file to `paste.rs`
 * Print a partial test summary
 
 ---
@@ -184,7 +187,7 @@ Pressing **Ctrl+C** during a test run will:
 .\v2pingo.exe -v -timeout 5s
 ```
 
-**Publish results and keep them private in turn:**
+**Share the results (answer `y` at the prompt) or never ask:**
 ```powershell
 .\v2pingo.exe
 .\v2pingo.exe -paste=false
@@ -200,4 +203,4 @@ Pressing **Ctrl+C** during a test run will:
 * **HTTP 403 / 404 / Non-200 Status:** Status codes like 403 or 404 mean the proxy connection itself succeeded, but the target server or cloudflare/CDN returned an error response.
 * **Real HTTP Requests:** `v2pingo` does not perform a simple ping to the proxy IP. It executes a real HTTP request routed through the in-process proxy core.
 * **Protocol Support:** VLESS, VMess, Trojan, Shadowsocks, SOCKS5, Hysteria2 and WireGuard. WireGuard nodes are tested through a sing-box endpoint, and Hysteria2 nodes always use TLS.
-* **Credential Safety:** Result files contain sensitive or private proxy credentials. Publishing to `paste.rs` is enabled by default, so any run that finds working configurations creates a public link — pass `-paste=false` when the results must not leave your machine.
+* **Credential Safety:** Result files contain sensitive or private proxy credentials. `v2pingo` only publishes them to `paste.rs` when you answer `y`/`yes` at the prompt, and that link is public — pass `-paste=false` when the results must never leave your machine.

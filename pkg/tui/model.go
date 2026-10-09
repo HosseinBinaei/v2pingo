@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
+	"v2pingo/pkg/paste"
 	"v2pingo/pkg/types"
 )
 
@@ -24,15 +25,14 @@ const (
 // ResultMsg carries one finished proxy test into the BubbleTea loop.
 type ResultMsg struct{ Res types.TestResult }
 
-// DoneMsg ends the run with final counters, the saved-file path, and the paste
-// link of the uploaded results file (when publishing is enabled).
+// DoneMsg ends the run with final counters and the saved-file path; the done
+// screen uses them to decide whether to offer the paste upload question.
 type DoneMsg struct {
 	Tested    int
 	Success   int
 	Failed    int
 	Links     []string
 	SavedFile string
-	PasteLink string
 	Elapsed   time.Duration
 	Notice    string
 }
@@ -46,25 +46,27 @@ type StartTestsMsg struct{ Cfg FormConfig }
 
 // Model is the single BubbleTea model for form, running, and done screens.
 type Model struct {
-	screen    Screen
-	inputs    []textinput.Model
-	focus     int
-	formErr   string
-	subs      []string
-	total     int
-	tested    int
-	succeeded int
-	failed    int
-	links     []string
-	recent    []string
-	savedFile string
-	pasteLink string
-	elapsed   time.Duration
-	notice    string
-	opts      Options
-	start     time.Time
-	spinner   spinner.Model
-	viewport  viewport.Model
+	screen         Screen
+	inputs         []textinput.Model
+	focus          int
+	formErr        string
+	subs           []string
+	total          int
+	tested         int
+	succeeded      int
+	failed         int
+	links          []string
+	recent         []string
+	savedFile      string
+	pasteLink      string
+	pastePrompt    bool
+	pasteUploading bool
+	elapsed        time.Duration
+	notice         string
+	opts           Options
+	start          time.Time
+	spinner        spinner.Model
+	viewport       viewport.Model
 }
 
 // NewModel builds the form screen. subs are the preloaded subscription lines
@@ -98,6 +100,11 @@ func NewModel(subs []string, target string, workers int, timeout time.Duration) 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		// The done screen may be waiting for a y/N answer; resolve it first so
+		// ordinary keys never fall through to navigation while it is pending.
+		if m.screen == ScreenDone && m.pastePrompt {
+			return m.resolvePastePrompt(msg)
+		}
 		switch msg.Type {
 		case tea.KeyCtrlC:
 			if m.screen == ScreenRunning {
@@ -142,7 +149,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	case StartTestsMsg:
 		if bound != nil {
-			startBackgroundRun(bound, msg.Cfg, m.opts)
+			startBackgroundRun(bound, msg.Cfg)
 		}
 		return m, nil
 	case TotalMsg:
@@ -168,10 +175,44 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case DoneMsg:
 		m.screen = ScreenDone
 		m.tested, m.succeeded, m.failed = msg.Tested, msg.Success, msg.Failed
-		m.links, m.savedFile, m.pasteLink, m.elapsed = msg.Links, msg.SavedFile, msg.PasteLink, msg.Elapsed
+		m.links, m.savedFile, m.elapsed = msg.Links, msg.SavedFile, msg.Elapsed
 		m.notice = msg.Notice
+		m.pasteLink = ""
+		m.pasteUploading = false
+		// Only ask when the run actually wrote a results file with healthy
+		// links; an interrupted partial DoneMsg carries no saved file.
+		m.pastePrompt = m.opts.AskPaste && msg.SavedFile != "" && len(msg.Links) > 0
+		return m, nil
+	case PasteDoneMsg:
+		m.pasteUploading = false
+		if msg.Err != nil {
+			m.notice = "paste upload failed: " + msg.Err.Error()
+			return m, nil
+		}
+		m.pasteLink = msg.Link
+		if msg.Link == "" {
+			m.notice = "nothing to upload"
+		}
 		return m, nil
 	}
+	return m, nil
+}
+
+// resolvePastePrompt answers the done-screen question. Only an explicit yes
+// uploads the results file; every other key keeps the run local, and q/Ctrl+C
+// still quit the program.
+func (m Model) resolvePastePrompt(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "ctrl+c", "q":
+		return m, tea.Quit
+	}
+	m.pastePrompt = false
+	if strings.EqualFold(msg.String(), "y") {
+		m.pasteUploading = true
+		m.notice = ""
+		return m, uploadResults(m.savedFile, m.opts.PasteEndpoint)
+	}
+	m.notice = "paste upload skipped"
 	return m, nil
 }
 
@@ -200,14 +241,26 @@ func (m Model) View() string {
 	case ScreenRunning:
 		return fmt.Sprintf("Testing %d/%d  ok=%d fail=%d  (Ctrl+C/q=cancel+save)\n%s", m.tested, m.total, m.succeeded, m.failed, m.viewport.View())
 	case ScreenDone:
-		s := fmt.Sprintf("Done: tested=%d success=%d failed=%d in %s\nSaved: %s\n(Enter=form q=quit)", m.tested, m.succeeded, m.failed, m.elapsed.Round(time.Second), m.savedFile)
-		if m.pasteLink != "" {
-			s += "\nPaste: " + m.pasteLink
+		var b strings.Builder
+		fmt.Fprintf(&b, "Done: tested=%d success=%d failed=%d in %s\n", m.tested, m.succeeded, m.failed, m.elapsed.Round(time.Second))
+		fmt.Fprintf(&b, "Saved: %s\n", m.savedFile)
+		switch {
+		case m.pasteUploading:
+			b.WriteString("Uploading to paste.rs...\n")
+		case m.pastePrompt:
+			b.WriteString(paste.Prompt + "\n")
+		case m.pasteLink != "":
+			b.WriteString("Paste: " + m.pasteLink + "\n")
 		}
 		if m.notice != "" {
-			s += "\n" + m.notice
+			b.WriteString(m.notice + "\n")
 		}
-		return s
+		if m.pastePrompt {
+			b.WriteString("(y = upload, any other key = skip, q = quit)")
+		} else {
+			b.WriteString("(Enter=form q=quit)")
+		}
+		return b.String()
 	default:
 		var b strings.Builder
 		b.WriteString("v2pingo — Tab moves, Enter starts, Ctrl+C quits\n")
