@@ -194,6 +194,80 @@ func TestModel_PasteDoneMsgFailureShowsNotice(t *testing.T) {
 	}
 }
 
+// pressPasteYes answers the pending paste question with y.
+func pressPasteYes(t *testing.T, m Model) Model {
+	t.Helper()
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+	return next.(Model)
+}
+
+func TestModel_FailedUploadAsksToRetry(t *testing.T) {
+	got := pressPasteYes(t, newSavedRunModel())
+	next, _ := got.Update(PasteDoneMsg{Err: fmt.Errorf("boom")})
+	res := next.(Model)
+	if !res.pastePrompt || !res.pasteRetry {
+		t.Fatalf("expected a retry question after a failed upload, got prompt=%v retry=%v", res.pastePrompt, res.pasteRetry)
+	}
+	if res.pasteLink != "" {
+		t.Fatalf("a failed upload must not produce a link, got %q", res.pasteLink)
+	}
+	view := res.View()
+	if !strings.Contains(view, "boom") || !strings.Contains(view, paste.RetryPrompt) {
+		t.Fatalf("expected the failure reason and retry question in the view, got %q", view)
+	}
+}
+
+func TestModel_RetryYesUploadsAgain(t *testing.T) {
+	got := pressPasteYes(t, newSavedRunModel())
+	failed, _ := got.Update(PasteDoneMsg{Err: fmt.Errorf("boom")})
+	next, cmd := failed.(Model).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+	res := next.(Model)
+	if res.pastePrompt || res.pasteRetry {
+		t.Fatalf("retrying must resolve the question, got prompt=%v retry=%v", res.pastePrompt, res.pasteRetry)
+	}
+	if !res.pasteUploading {
+		t.Fatal("expected retry to start a fresh upload")
+	}
+	if cmd == nil {
+		t.Fatal("expected an upload command for the retry")
+	}
+}
+
+func TestModel_RetryDeclinedGivesUp(t *testing.T) {
+	for _, answer := range []string{"n", "x", " "} {
+		got := pressPasteYes(t, newSavedRunModel())
+		failed, _ := got.Update(PasteDoneMsg{Err: fmt.Errorf("boom")})
+		next, cmd := failed.(Model).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(answer)})
+		res := next.(Model)
+		if res.pastePrompt || res.pasteRetry || res.pasteUploading {
+			t.Errorf("answer %q must give up on the upload, got prompt=%v retry=%v uploading=%v", answer, res.pastePrompt, res.pasteRetry, res.pasteUploading)
+		}
+		if cmd != nil {
+			t.Errorf("answer %q must not return an upload command", answer)
+		}
+		if !strings.Contains(res.notice, "boom") {
+			t.Errorf("answer %q must report the failure, got notice %q", answer, res.notice)
+		}
+	}
+}
+
+func TestModel_SuccessfulRetryShowsLink(t *testing.T) {
+	got := pressPasteYes(t, newSavedRunModel())
+	failed, _ := got.Update(PasteDoneMsg{Err: fmt.Errorf("boom")})
+	retried, _ := failed.(Model).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+	next, _ := retried.(Model).Update(PasteDoneMsg{Link: "https://paste.rs/retry"})
+	res := next.(Model)
+	if res.pasteLink != "https://paste.rs/retry" {
+		t.Fatalf("expected the retry link to be stored, got %q", res.pasteLink)
+	}
+	if res.pasteRetry || res.pasteErr != "" {
+		t.Fatalf("a successful retry must clear the retry state, got retry=%v err=%q", res.pasteRetry, res.pasteErr)
+	}
+	if !strings.Contains(res.View(), "https://paste.rs/retry") {
+		t.Fatalf("expected the retry link in the view, got %q", res.View())
+	}
+}
+
 func TestModel_NoPasteQuestionWithoutSavedResults(t *testing.T) {
 	cases := []struct {
 		name string

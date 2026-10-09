@@ -126,7 +126,17 @@ Paste link: https://paste.rs/AbCdE
 
 Answer `y`, `Y`, `yes`, `YES` or `Yes` to upload the file to [paste.rs](https://paste.rs) and get the link. **Any other answer** — `n`, Enter, a random word, or running without an interactive prompt — keeps the results on your machine and prints `Skipped paste upload.`
 
-In the TUI the same question appears on the done screen: press `y` to upload, any other key to skip, and the link is then shown as a `Paste:` line.
+If the upload fails (network down, paste.rs unreachable, bad response), the failure is reported and you are asked whether to try again:
+
+```text
+Warning: failed to upload results file: ...
+Upload failed. Retry uploading to paste.rs? [y/N]: y
+Paste link: https://paste.rs/AbCdE
+```
+
+Answer `y` / `yes` to attempt the upload again; **any other answer** gives up and the process ends with the results still saved locally (`Giving up on paste upload; results remain saved locally.`).
+
+In the TUI the same questions appear on the done screen: press `y` to upload or retry, any other key to skip or give up, and a successful link is then shown as a `Paste:` line.
 
 Details:
 

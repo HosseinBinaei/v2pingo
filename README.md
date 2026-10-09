@@ -34,8 +34,9 @@ Built in Go for Windows (single runnable `.exe`), it tests configurations direct
 - **Opt-In Shareable Results:**
   - Once the results file is written, the tool asks whether to upload it to [paste.rs](https://paste.rs) — answering `y` / `yes` uploads it and prints the link, any other answer simply keeps the local file.
   - The question is only asked when a results file with healthy configurations actually exists; empty runs save nothing and are never asked about.
+  - If the upload fails, the error is reported and you are asked whether to retry — `y` / `yes` tries again, any other answer gives up and leaves the saved file on disk.
   - Skip the question entirely with `-paste=false`, or point it at another paste service with `-paste-url`.
-  - The TUI shows the same question on its done screen (`y` uploads, any other key skips).
+  - The TUI shows the same questions on its done screen (`y` uploads or retries, any other key skips or gives up).
 
 ---
 
@@ -102,6 +103,14 @@ Paste link: https://paste.rs/AbCdE
 
 Answer `y`, `Y`, `yes`, `YES` or `Yes` to upload; **anything else** (including just pressing Enter, or running non-interactively) keeps the results local and prints `Skipped paste upload.`
 
+If the upload itself fails, the reason is printed and the tool asks again:
+```text
+Warning: failed to upload results file: ...
+Upload failed. Retry uploading to paste.rs? [y/N]: y
+Paste link: https://paste.rs/AbCdE
+```
+Answering anything other than `y` / `yes` ends the run with the results still saved locally (`Giving up on paste upload; results remain saved locally.`).
+
 Skip the question altogether, or send it to another paste service that follows the same API:
 ```powershell
 .\v2pingo.exe -paste=false
@@ -163,7 +172,7 @@ Upload the saved results to paste.rs and get a shareable link? [y/N]: y
 Paste link: https://paste.rs/AbCdE
 ```
 
-Any other answer prints `Skipped paste upload.` and nothing is sent. On the TUI's done screen the same question is answered with a single key (`y` = upload, any other key = skip) and the link appears as a `Paste:` line.
+Any other answer prints `Skipped paste upload.` and nothing is sent. A failed upload is reported and followed by a retry question: `y` attempts the upload again, any other answer gives up with the results left in the local file. On the TUI's done screen the same questions are answered with a single key (`y` = upload or retry, any other key = skip or give up) and a successful link appears as a `Paste:` line.
 
 ### Final Summary
 ```text

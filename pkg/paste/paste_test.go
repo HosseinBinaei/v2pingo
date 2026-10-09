@@ -137,6 +137,15 @@ func TestIsAffirmative(t *testing.T) {
 	}
 }
 
+func TestPromptsAreDistinctAndNonEmpty(t *testing.T) {
+	if strings.TrimSpace(Prompt) == "" || strings.TrimSpace(RetryPrompt) == "" {
+		t.Fatal("both the initial and the retry prompt must be non-empty")
+	}
+	if Prompt == RetryPrompt {
+		t.Fatalf("the retry prompt must ask a different question, both were %q", Prompt)
+	}
+}
+
 func TestNewClient_DefaultsEndpoint(t *testing.T) {
 	if got := NewClient("").Endpoint; got != DefaultEndpoint {
 		t.Errorf("expected default endpoint %q, got %q", DefaultEndpoint, got)

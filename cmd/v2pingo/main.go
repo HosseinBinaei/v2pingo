@@ -137,35 +137,56 @@ func main() {
 // uploads it only on an affirmative answer (y / yes, any case). Anything else —
 // including an empty answer or EOF — keeps the run local and skips the upload,
 // so a non-interactive run never blocks or publishes by accident.
+//
+// A failed upload is reported and then the user is asked whether to try again;
+// declining retry (or any non-affirmative answer) ends the process with the
+// results still saved locally.
 func promptPasteUpload(path, endpoint string) {
 	if _, err := os.Stat(path); err != nil {
 		return // no results file was saved, nothing to publish
 	}
 
-	fmt.Print(paste.Prompt)
-	answer, err := bufio.NewReader(os.Stdin).ReadString('\n')
+	// One reader is reused for every question so no buffered line is lost
+	// between the initial prompt and a retry prompt.
+	reader := bufio.NewReader(os.Stdin)
+	if !askYesNo(reader, paste.Prompt) {
+		fmt.Println("Skipped paste upload.")
+		return
+	}
+
+	client := paste.NewClient(endpoint)
+	for {
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		link, err := client.UploadFile(ctx, path)
+		cancel()
+
+		if err == nil {
+			if link == "" {
+				fmt.Println("Skipped paste upload.")
+				return
+			}
+			fmt.Printf("Paste link: %s\n", link)
+			return
+		}
+
+		fmt.Fprintf(os.Stderr, "Warning: failed to upload results file: %v\n", err)
+		if !askYesNo(reader, paste.RetryPrompt) {
+			fmt.Println("Giving up on paste upload; results remain saved locally.")
+			return
+		}
+	}
+}
+
+// askYesNo prints prompt and reads one line, reporting whether the answer means
+// yes (y / yes, any case, whitespace-tolerant). EOF and empty answers are no.
+func askYesNo(reader *bufio.Reader, prompt string) bool {
+	fmt.Print(prompt)
+	answer, err := reader.ReadString('\n')
 	if err != nil {
 		// EOF or a missing trailing newline: keep the next line separate.
 		fmt.Println()
 	}
-	if !paste.IsAffirmative(answer) {
-		fmt.Println("Skipped paste upload.")
-		return
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	defer cancel()
-
-	link, err := paste.NewClient(endpoint).UploadFile(ctx, path)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: failed to upload results file: %v\n", err)
-		return
-	}
-	if link == "" {
-		fmt.Println("Skipped paste upload.")
-		return
-	}
-	fmt.Printf("Paste link: %s\n", link)
+	return paste.IsAffirmative(answer)
 }
 
 func isTerminal() bool {

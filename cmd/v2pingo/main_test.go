@@ -333,6 +333,156 @@ func TestCLIIntegrationPasteDeclined(t *testing.T) {
 	}
 }
 
+// localProxyEnv starts a loopback SOCKS5 proxy plus a subscription server that
+// offers it, so a CLI test can run the whole flow without touching the network.
+// It returns the subscription URL and the target URL the tested node must reach.
+func localProxyEnv(t *testing.T) (subURL, targetURL string) {
+	t.Helper()
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to start the local SOCKS5 proxy: %v", err)
+	}
+	t.Cleanup(func() { _ = ln.Close() })
+	go serveSOCKS5(ln)
+
+	targetSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(targetSrv.Close)
+
+	subSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprintln(w, "socks5://"+ln.Addr().String()+"#local")
+	}))
+	t.Cleanup(subSrv.Close)
+
+	return subSrv.URL, targetSrv.URL
+}
+
+// pasteTestBinary builds the CLI once for a paste integration test and returns
+// its path plus the isolated working directory the run must use.
+func pasteTestBinary(t *testing.T, name string) string {
+	t.Helper()
+	tmpDir := t.TempDir()
+	binPath := filepath.Join(tmpDir, name)
+	buildCmd := exec.Command(goExecutable(), "build", "-o", binPath, ".")
+	if buildOut, err := buildCmd.CombinedOutput(); err != nil {
+		t.Fatalf("failed to build test binary: %v\nOutput: %s", err, string(buildOut))
+	}
+	return binPath
+}
+
+// TestCLIIntegrationPasteRetryAfterFailure verifies that a failed upload is
+// reported and, when the user answers yes to the retry question, the upload is
+// attempted again and the link is printed.
+func TestCLIIntegrationPasteRetryAfterFailure(t *testing.T) {
+	var mu sync.Mutex
+	hits := 0
+	pasteSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		hits++
+		attempt := hits
+		mu.Unlock()
+		if attempt == 1 {
+			w.WriteHeader(http.StatusInternalServerError)
+			fmt.Fprintln(w, "boom")
+			return
+		}
+		w.WriteHeader(http.StatusCreated)
+		fmt.Fprintln(w, "https://paste.rs/retry123")
+	}))
+	defer pasteSrv.Close()
+
+	subURL, targetURL := localProxyEnv(t)
+	binPath := pasteTestBinary(t, "v2pingo_paste_retry_test.exe")
+
+	cmd := exec.Command(binPath,
+		"-default-subs=false",
+		"-sub", subURL,
+		"-url", targetURL,
+		"-c", "1",
+		"-timeout", "10s",
+		"-paste-url", pasteSrv.URL,
+	)
+	cmd.Dir = filepath.Dir(binPath)
+	// yes to the initial prompt, then yes to the retry prompt.
+	cmd.Stdin = strings.NewReader("y\ny\n")
+
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("binary execution failed: %v\nOutput: %s", err, string(out))
+	}
+	outStr := string(out)
+
+	if !strings.Contains(outStr, "failed to upload results file") {
+		t.Errorf("expected the first upload failure to be reported, got:\n%s", outStr)
+	}
+	if !strings.Contains(outStr, "Retry uploading to paste.rs") {
+		t.Errorf("expected the retry question after the failure, got:\n%s", outStr)
+	}
+	if !strings.Contains(outStr, "Paste link: https://paste.rs/retry123") {
+		t.Errorf("expected the link from the successful retry, got:\n%s", outStr)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if hits != 2 {
+		t.Errorf("expected exactly two upload attempts (one failed, one retried), got %d", hits)
+	}
+}
+
+// TestCLIIntegrationPasteRetryDeclined verifies that declining the retry
+// question ends the run: the failure is reported, no further attempt is made,
+// and no link is printed.
+func TestCLIIntegrationPasteRetryDeclined(t *testing.T) {
+	var mu sync.Mutex
+	hits := 0
+	pasteSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		hits++
+		mu.Unlock()
+		w.WriteHeader(http.StatusInternalServerError)
+		fmt.Fprintln(w, "boom")
+	}))
+	defer pasteSrv.Close()
+
+	subURL, targetURL := localProxyEnv(t)
+	binPath := pasteTestBinary(t, "v2pingo_paste_retry_decline_test.exe")
+
+	cmd := exec.Command(binPath,
+		"-default-subs=false",
+		"-sub", subURL,
+		"-url", targetURL,
+		"-c", "1",
+		"-timeout", "10s",
+		"-paste-url", pasteSrv.URL,
+	)
+	cmd.Dir = filepath.Dir(binPath)
+	// yes to the initial prompt, no to the retry question.
+	cmd.Stdin = strings.NewReader("y\nn\n")
+
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("binary execution failed: %v\nOutput: %s", err, string(out))
+	}
+	outStr := string(out)
+
+	if !strings.Contains(outStr, "Retry uploading to paste.rs") {
+		t.Errorf("expected the retry question after the failure, got:\n%s", outStr)
+	}
+	if !strings.Contains(outStr, "Giving up on paste upload") {
+		t.Errorf("expected the give-up notice, got:\n%s", outStr)
+	}
+	if strings.Contains(outStr, "Paste link:") {
+		t.Errorf("declined retry must not print a paste link, got:\n%s", outStr)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if hits != 1 {
+		t.Errorf("declined retry must not upload again, got %d attempt(s)", hits)
+	}
+}
+
 func TestCLIIntegrationSubscriptionFile(t *testing.T) {
 	// Create mock server for subscription endpoint
 	mockSubContent := "vless://00000000-0000-0000-0000-000000000000@127.0.0.1:1080?type=tcp#FileVLESS\n"

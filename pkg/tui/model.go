@@ -60,6 +60,8 @@ type Model struct {
 	savedFile      string
 	pasteLink      string
 	pastePrompt    bool
+	pasteRetry     bool
+	pasteErr       string
 	pasteUploading bool
 	elapsed        time.Duration
 	notice         string
@@ -178,6 +180,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.links, m.savedFile, m.elapsed = msg.Links, msg.SavedFile, msg.Elapsed
 		m.notice = msg.Notice
 		m.pasteLink = ""
+		m.pasteErr = ""
+		m.pasteRetry = false
 		m.pasteUploading = false
 		// Only ask when the run actually wrote a results file with healthy
 		// links; an interrupted partial DoneMsg carries no saved file.
@@ -186,9 +190,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case PasteDoneMsg:
 		m.pasteUploading = false
 		if msg.Err != nil {
-			m.notice = "paste upload failed: " + msg.Err.Error()
+			// The upload failed: surface the reason and ask whether to try
+			// again instead of silently dropping the shareable link.
+			m.pasteErr = msg.Err.Error()
+			m.pasteRetry = true
+			m.pastePrompt = true
 			return m, nil
 		}
+		m.pasteErr = ""
+		m.pasteRetry = false
 		m.pasteLink = msg.Link
 		if msg.Link == "" {
 			m.notice = "nothing to upload"
@@ -200,20 +210,28 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // resolvePastePrompt answers the done-screen question. Only an explicit yes
 // uploads the results file; every other key keeps the run local, and q/Ctrl+C
-// still quit the program.
+// still quit the program. The same state machine answers the retry question
+// shown after a failed upload: y tries again, anything else gives up.
 func (m Model) resolvePastePrompt(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "ctrl+c", "q":
 		return m, tea.Quit
 	}
+	yes := strings.EqualFold(msg.String(), "y")
+	retrying := m.pasteRetry
 	m.pastePrompt = false
-	if strings.EqualFold(msg.String(), "y") {
-		m.pasteUploading = true
-		m.notice = ""
-		return m, uploadResults(m.savedFile, m.opts.PasteEndpoint)
+	m.pasteRetry = false
+	if !yes {
+		if retrying {
+			m.notice = "paste upload failed: " + m.pasteErr
+		} else {
+			m.notice = "paste upload skipped"
+		}
+		return m, nil
 	}
-	m.notice = "paste upload skipped"
-	return m, nil
+	m.pasteUploading = true
+	m.notice = ""
+	return m, uploadResults(m.savedFile, m.opts.PasteEndpoint)
 }
 
 // cancelRun stops the in-flight run and emits a partial DoneMsg carrying the
@@ -247,6 +265,9 @@ func (m Model) View() string {
 		switch {
 		case m.pasteUploading:
 			b.WriteString("Uploading to paste.rs...\n")
+		case m.pastePrompt && m.pasteRetry:
+			b.WriteString("Paste upload failed: " + m.pasteErr + "\n")
+			b.WriteString(paste.RetryPrompt + "\n")
 		case m.pastePrompt:
 			b.WriteString(paste.Prompt + "\n")
 		case m.pasteLink != "":
@@ -255,9 +276,12 @@ func (m Model) View() string {
 		if m.notice != "" {
 			b.WriteString(m.notice + "\n")
 		}
-		if m.pastePrompt {
+		switch {
+		case m.pastePrompt && m.pasteRetry:
+			b.WriteString("(y = retry, any other key = give up, q = quit)")
+		case m.pastePrompt:
 			b.WriteString("(y = upload, any other key = skip, q = quit)")
-		} else {
+		default:
 			b.WriteString("(Enter=form q=quit)")
 		}
 		return b.String()

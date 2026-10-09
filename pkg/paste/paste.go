@@ -28,6 +28,11 @@ const maxResponseBytes = 4096
 // default answer is "no": only an explicit yes publishes the file.
 const Prompt = "Upload the saved results to paste.rs and get a shareable link? [y/N]: "
 
+// RetryPrompt is the question asked when an upload attempt failed. Like Prompt
+// it defaults to "no", so a failed run never loops unless the user asks for
+// another attempt explicitly.
+const RetryPrompt = "Upload failed. Retry uploading to paste.rs? [y/N]: "
+
 // IsAffirmative reports whether an answer to Prompt means yes. The check is
 // case-insensitive and whitespace-tolerant, so y, Y, yes, YES and Yes all
 // count, while everything else (including an empty answer or EOF) means no.
