@@ -6,10 +6,20 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"v2pingo/pkg/paste"
 	"v2pingo/pkg/runner"
 	"v2pingo/pkg/subscription"
 	"v2pingo/pkg/types"
 )
+
+// Options holds run settings that are not part of the interactive form.
+type Options struct {
+	// Paste uploads the saved results file to the paste service when the run
+	// finishes, and surfaces the link on the done screen.
+	Paste bool
+	// PasteEndpoint overrides the paste service URL; empty means paste.rs.
+	PasteEndpoint string
+}
 
 // bound is the running program, set by Run before prog.Run() so Update can
 // start the background test goroutine when StartTestsMsg arrives.
@@ -22,8 +32,9 @@ var boundCancel context.CancelFunc
 func bindProgram(p *tea.Program) { bound = p }
 
 // Run starts the interactive TUI with CLI flag values as form defaults.
-func Run(subs []string, target string, workers int, timeout time.Duration) error {
+func Run(subs []string, target string, workers int, timeout time.Duration, opts Options) error {
 	m := NewModel(subs, target, workers, timeout)
+	m.opts = opts
 	prog := tea.NewProgram(m)
 	bindProgram(prog)
 	defer func() {
@@ -36,7 +47,7 @@ func Run(subs []string, target string, workers int, timeout time.Duration) error
 
 // startBackgroundRun executes fetch -> dedupe -> RunPool off the UI thread
 // and forwards every result with prog.Send (goroutine-safe in BubbleTea).
-func startBackgroundRun(prog *tea.Program, cfg FormConfig) {
+func startBackgroundRun(prog *tea.Program, cfg FormConfig, opts Options) {
 	go func() {
 		start := time.Now()
 		ctx, cancel := context.WithCancel(context.Background())
@@ -68,6 +79,24 @@ func startBackgroundRun(prog *tea.Program, cfg FormConfig) {
 			prog.Send(ResultMsg{Res: res})
 		})
 		tested, okCount, failCount, links := col.Snapshot()
-		prog.Send(DoneMsg{Tested: tested, Success: okCount, Failed: failCount, Links: links, SavedFile: resultsFile, Elapsed: time.Since(start)})
+		pasteLink, pasteErr := publishResults(opts, resultsFile)
+		notice := ""
+		if pasteErr != nil {
+			notice = "paste upload failed: " + pasteErr.Error()
+		}
+		prog.Send(DoneMsg{Tested: tested, Success: okCount, Failed: failCount, Links: links, SavedFile: resultsFile, PasteLink: pasteLink, Elapsed: time.Since(start), Notice: notice})
 	}()
+}
+
+// publishResults uploads the saved results file when publishing is enabled and
+// returns the paste link. A missing or empty results file yields an empty link
+// and no error, so an unproductive run is not reported as an upload failure.
+func publishResults(opts Options, resultsFile string) (string, error) {
+	if !opts.Paste {
+		return "", nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	return paste.NewClient(opts.PasteEndpoint).UploadFile(ctx, resultsFile)
 }

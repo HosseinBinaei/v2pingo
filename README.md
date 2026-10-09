@@ -31,6 +31,10 @@ Built in Go for Windows (single runnable `.exe`), it tests configurations direct
   - Real-time live status updates without leaking credentials, passwords, UUIDs, or Reality keys.
   - Optional verbose mode (`-v` / `-verbose`) for inspecting failures.
   - Graceful shutdown on `Ctrl+C` (`SIGINT` / `SIGTERM`) that halts workers safely and prints a summary for completed tests.
+- **Shareable Results:**
+  - After the results file is written, it is uploaded to [paste.rs](https://paste.rs) and the returned link is printed (both in the CLI and on the TUI done screen).
+  - Disable publishing with `-paste=false`, or point it at another paste service with `-paste-url`.
+  - Empty runs (no HTTP 2xx configurations) are skipped, so no link is produced and no request is sent.
 
 ---
 
@@ -87,6 +91,21 @@ Show failed tests in addition to successful ones:
 .\v2pingo.exe -v
 ```
 
+### 6. Publishing Results
+By default, the saved results file is uploaded to `paste.rs` once the run finishes and the link is printed:
+```text
+Saved 42 HTTP 2xx configuration(s) to results\results_20261009_183039.md
+Paste link: https://paste.rs/AbCdE
+```
+
+Disable the upload, or send it to another paste service that follows the same API:
+```powershell
+.\v2pingo.exe -paste=false
+.\v2pingo.exe -paste-url "https://my-paste.example.com/"
+```
+
+> The uploaded file contains working proxy share links (credentials included). Publishing is enabled by default as requested, but the link is public — keep `-paste=false` when the results must stay private.
+
 ---
 
 ## Subscription List File (`sub-input.txt`)
@@ -114,6 +133,8 @@ Add or remove lines to change which subscriptions are fetched — every remainin
 | `-sub-file` | `string` | `sub-input.txt` | Path to the subscription list file (one URL per line). |
 | `-sub` | `string` | *(empty)* | Custom subscription URL(s) (repeatable or comma-separated). |
 | `-v`, `-verbose` | `bool` | `false` | Enable verbose output (prints failed tests). |
+| `-paste` | `bool` | `true` | Upload the saved results file to the paste service and print the link. |
+| `-paste-url` | `string` | `https://paste.rs/` | Paste service endpoint used when `-paste` is enabled. |
 
 ---
 
@@ -130,6 +151,14 @@ Add or remove lines to change which subscriptions are fetched — every remainin
 ```text
 [✗ FAILED] [#15] [vless] 198.51.100.2:443 - context deadline exceeded
 ```
+
+### Paste Upload
+```text
+Saved 42 HTTP 2xx configuration(s) to results\results_20261009_183039.md
+Paste link: https://paste.rs/AbCdE
+```
+
+On the TUI's done screen the same link is shown as a `Paste:` line.
 
 ### Final Summary
 ```text
@@ -182,6 +211,9 @@ sub-input.txt (one URL per line) + custom -sub URLs
        │                  ──► HTTP Client over outbound/endpoint DialContext
        ▼
  [Reporter & Sanitizer]  ──► Live progress & final summary
+       │
+       ▼
+ [Paste Publisher]       ──► POST results_*.md to paste.rs, print the short link
 ```
 
 ---

@@ -11,9 +11,11 @@ import (
 	"syscall"
 	"time"
 
+	"v2pingo/pkg/paste"
 	"v2pingo/pkg/reporter"
 	"v2pingo/pkg/runner"
 	"v2pingo/pkg/subscription"
+	"v2pingo/pkg/tui"
 )
 
 // stringSliceFlag supports repeatable -sub flags and comma-separated values.
@@ -47,6 +49,8 @@ func main() {
 	var subFlags stringSliceFlag
 	flag.Var(&subFlags, "sub", "Custom subscription URL (repeatable or comma-separated)")
 	tuiFlag := flag.Bool("tui", true, "Launch interactive terminal UI")
+	pasteFlag := flag.Bool("paste", true, "Upload the saved results file to paste.rs and print the link")
+	pasteURLFlag := flag.String("paste-url", paste.DefaultEndpoint, "Paste service endpoint used by -paste")
 
 	flag.Parse()
 
@@ -54,7 +58,10 @@ func main() {
 		subFilePath := subscription.ResolveSubscriptionFile(*subFileFlag)
 		fileSubs, _ := subscription.LoadSubscriptionFile(subFilePath)
 		allSubs := append(append([]string{}, fileSubs...), subFlags...)
-		if err := runTUI(allSubs, *targetURLFlag, *concurrencyFlag, *timeoutFlag); err != nil {
+		if err := runTUI(allSubs, *targetURLFlag, *concurrencyFlag, *timeoutFlag, tui.Options{
+			Paste:         *pasteFlag,
+			PasteEndpoint: *pasteURLFlag,
+		}); err != nil {
 			fmt.Fprintf(os.Stderr, "TUI error: %v\n", err)
 			os.Exit(1)
 		}
@@ -119,6 +126,28 @@ func main() {
 
 	rep.PrintSummary(duration)
 	fmt.Printf("Healthy links appended to %s (checkpoint: %s)\n", resultsFile, checkpointFile)
+
+	if *pasteFlag {
+		uploadResultsFile(resultsFile, *pasteURLFlag)
+	}
+}
+
+// uploadResultsFile publishes the saved results file to the paste service and
+// prints the resulting link. A failed or unnecessary upload is reported as a
+// warning so it never turns a completed test run into a failure.
+func uploadResultsFile(path, endpoint string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	link, err := paste.NewClient(endpoint).UploadFile(ctx, path)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to upload results file: %v\n", err)
+		return
+	}
+	if link == "" {
+		return
+	}
+	fmt.Printf("Paste link: %s\n", link)
 }
 
 func isTerminal() bool {

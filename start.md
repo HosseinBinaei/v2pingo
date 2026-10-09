@@ -107,25 +107,52 @@ Enable verbose output to view failed proxy tests alongside sanitized error reaso
 Configurations that return an **HTTP 200** status code are automatically saved at the end of execution (or upon pressing Ctrl+C) to a Markdown file:
 
 ```text
-results_YYYYMMDD_HHMMSS.md
+results/results_YYYYMMDD_HHMMSS.md
 ```
 
 The file contains the working proxy configurations saved as original share links, one per line.
 
 ---
 
-## 9. Stop / Ctrl+C
+## 9. Shareable Link (paste.rs)
+
+As soon as the results file is saved, `v2pingo` uploads it to [paste.rs](https://paste.rs) and prints the link:
+
+```text
+Saved 42 HTTP 2xx configuration(s) to results/results_20261009_183039.md
+Paste link: https://paste.rs/AbCdE
+```
+
+In the TUI the same link appears on the done screen as a `Paste:` line.
+
+Details:
+
+* If the run found no HTTP 2xx configuration, no results file is created and the upload is skipped (no link, no request).
+* Disable publishing for a run with `-paste=false`.
+* Point the upload at another service that follows the same API with `-paste-url`:
+
+```powershell
+.\v2pingo.exe -paste=false
+.\v2pingo.exe -paste-url "https://my-paste.example.com/"
+```
+
+> **Privacy note:** the uploaded file contains working proxy share links, credentials included, and the paste link is public. Use `-paste=false` when the results must stay private.
+
+---
+
+## 10. Stop / Ctrl+C
 
 Pressing **Ctrl+C** during a test run will:
 
 * Cancel ongoing worker tests gracefully
 * Preserve results from all completed tests
 * Save configurations that received HTTP 200 to the results file
+* Upload the partial results file to `paste.rs` and print the link
 * Print a partial test summary
 
 ---
 
-## 10. Practical Recommended Examples
+## 11. Practical Recommended Examples
 
 **Quick default test:**
 ```powershell
@@ -157,9 +184,15 @@ Pressing **Ctrl+C** during a test run will:
 .\v2pingo.exe -v -timeout 5s
 ```
 
+**Publish results and keep them private in turn:**
+```powershell
+.\v2pingo.exe
+.\v2pingo.exe -paste=false
+```
+
 ---
 
-## 11. Important Notes
+## 12. Important Notes
 
 * **Internet Access:** `v2pingo` requires an active internet connection to fetch subscription lists and perform target URL checks.
 * **Target-Dependent Results:** A proxy may succeed for one target URL (e.g., `https://google.com`) but fail or time out for another.
@@ -167,4 +200,4 @@ Pressing **Ctrl+C** during a test run will:
 * **HTTP 403 / 404 / Non-200 Status:** Status codes like 403 or 404 mean the proxy connection itself succeeded, but the target server or cloudflare/CDN returned an error response.
 * **Real HTTP Requests:** `v2pingo` does not perform a simple ping to the proxy IP. It executes a real HTTP request routed through the in-process proxy core.
 * **Protocol Support:** VLESS, VMess, Trojan, Shadowsocks, SOCKS5, Hysteria2 and WireGuard. WireGuard nodes are tested through a sing-box endpoint, and Hysteria2 nodes always use TLS.
-* **Credential Safety:** Do not expose or publicly share result files containing sensitive or private proxy credentials.
+* **Credential Safety:** Result files contain sensitive or private proxy credentials. Publishing to `paste.rs` is enabled by default, so any run that finds working configurations creates a public link — pass `-paste=false` when the results must not leave your machine.

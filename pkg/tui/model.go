@@ -24,13 +24,15 @@ const (
 // ResultMsg carries one finished proxy test into the BubbleTea loop.
 type ResultMsg struct{ Res types.TestResult }
 
-// DoneMsg ends the run with final counters and the saved-file path.
+// DoneMsg ends the run with final counters, the saved-file path, and the paste
+// link of the uploaded results file (when publishing is enabled).
 type DoneMsg struct {
 	Tested    int
 	Success   int
 	Failed    int
 	Links     []string
 	SavedFile string
+	PasteLink string
 	Elapsed   time.Duration
 	Notice    string
 }
@@ -56,8 +58,10 @@ type Model struct {
 	links     []string
 	recent    []string
 	savedFile string
+	pasteLink string
 	elapsed   time.Duration
 	notice    string
+	opts      Options
 	start     time.Time
 	spinner   spinner.Model
 	viewport  viewport.Model
@@ -138,7 +142,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	case StartTestsMsg:
 		if bound != nil {
-			startBackgroundRun(bound, msg.Cfg)
+			startBackgroundRun(bound, msg.Cfg, m.opts)
 		}
 		return m, nil
 	case TotalMsg:
@@ -164,7 +168,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case DoneMsg:
 		m.screen = ScreenDone
 		m.tested, m.succeeded, m.failed = msg.Tested, msg.Success, msg.Failed
-		m.links, m.savedFile, m.elapsed = msg.Links, msg.SavedFile, msg.Elapsed
+		m.links, m.savedFile, m.pasteLink, m.elapsed = msg.Links, msg.SavedFile, msg.PasteLink, msg.Elapsed
 		m.notice = msg.Notice
 		return m, nil
 	}
@@ -197,6 +201,9 @@ func (m Model) View() string {
 		return fmt.Sprintf("Testing %d/%d  ok=%d fail=%d  (Ctrl+C/q=cancel+save)\n%s", m.tested, m.total, m.succeeded, m.failed, m.viewport.View())
 	case ScreenDone:
 		s := fmt.Sprintf("Done: tested=%d success=%d failed=%d in %s\nSaved: %s\n(Enter=form q=quit)", m.tested, m.succeeded, m.failed, m.elapsed.Round(time.Second), m.savedFile)
+		if m.pasteLink != "" {
+			s += "\nPaste: " + m.pasteLink
+		}
 		if m.notice != "" {
 			s += "\n" + m.notice
 		}

@@ -105,6 +105,19 @@ func TestModel_QCancelsRunWithoutQuitting(t *testing.T) {
 	}
 }
 
+func TestModel_DoneMsgShowsPasteLink(t *testing.T) {
+	m := NewModel([]string{"https://a.com/s"}, "https://x.com", 20, 15*time.Second)
+	m.screen = ScreenRunning
+	next, _ := m.Update(DoneMsg{Tested: 5, Success: 2, Failed: 3, SavedFile: "results/x.md", PasteLink: "https://paste.rs/abc"})
+	got := next.(Model)
+	if got.pasteLink != "https://paste.rs/abc" {
+		t.Fatalf("expected paste link to be stored, got %q", got.pasteLink)
+	}
+	if !strings.Contains(got.View(), "https://paste.rs/abc") {
+		t.Fatalf("expected paste link in done view, got %q", got.View())
+	}
+}
+
 func TestModel_PartialDoneMsgShowsNotice(t *testing.T) {
 	m := NewModel([]string{"https://a.com/s"}, "https://x.com", 20, 15*time.Second)
 	m.screen = ScreenRunning

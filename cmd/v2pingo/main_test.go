@@ -1,13 +1,20 @@
 package main
 
 import (
+	"bufio"
+	"fmt"
+	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 )
 
 // goExecutable returns the Go tool used to build the integration test binary.
@@ -75,6 +82,8 @@ func TestCLIIntegration(t *testing.T) {
 		"-c", "2",
 		"-timeout", "1s",
 		"-v",
+		// Keep the integration test offline: no paste.rs upload attempt.
+		"-paste=false",
 	)
 
 	out, err := cmd.CombinedOutput()
@@ -94,6 +103,158 @@ func TestCLIIntegration(t *testing.T) {
 	}
 	if !strings.Contains(outStr, "Healthy links appended to") {
 		t.Errorf("output missing appended results line: %s", outStr)
+	}
+}
+
+// serveSOCKS5 accepts CONNECT requests on ln and forwards them to the requested
+// address. It is a minimal no-auth SOCKS5 server that gives the paste
+// integration test a genuinely working proxy without touching the network.
+func serveSOCKS5(ln net.Listener) {
+	for {
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		go func(c net.Conn) {
+			defer c.Close()
+			br := bufio.NewReader(c)
+			header := make([]byte, 2)
+			if _, err := io.ReadFull(br, header); err != nil || header[0] != 5 {
+				return
+			}
+			methods := make([]byte, int(header[1]))
+			if _, err := io.ReadFull(br, methods); err != nil {
+				return
+			}
+			if _, err := c.Write([]byte{5, 0}); err != nil { // no authentication required
+				return
+			}
+
+			req := make([]byte, 4)
+			if _, err := io.ReadFull(br, req); err != nil || req[0] != 5 || req[1] != 1 {
+				return
+			}
+			var host string
+			switch req[3] {
+			case 1:
+				b := make([]byte, 4)
+				if _, err := io.ReadFull(br, b); err != nil {
+					return
+				}
+				host = net.IP(b).String()
+			case 3:
+				n := make([]byte, 1)
+				if _, err := io.ReadFull(br, n); err != nil {
+					return
+				}
+				b := make([]byte, int(n[0]))
+				if _, err := io.ReadFull(br, b); err != nil {
+					return
+				}
+				host = string(b)
+			case 4:
+				b := make([]byte, 16)
+				if _, err := io.ReadFull(br, b); err != nil {
+					return
+				}
+				host = net.IP(b).String()
+			default:
+				return
+			}
+			portBytes := make([]byte, 2)
+			if _, err := io.ReadFull(br, portBytes); err != nil {
+				return
+			}
+			port := int(portBytes[0])<<8 | int(portBytes[1])
+
+			upstream, err := net.DialTimeout("tcp", net.JoinHostPort(host, strconv.Itoa(port)), 5*time.Second)
+			if err != nil {
+				_, _ = c.Write([]byte{5, 5, 0, 1, 0, 0, 0, 0, 0, 0}) // connection refused
+				return
+			}
+			defer upstream.Close()
+			if _, err := c.Write([]byte{5, 0, 0, 1, 0, 0, 0, 0, 0, 0}); err != nil {
+				return
+			}
+			done := make(chan struct{}, 2)
+			go func() { _, _ = io.Copy(upstream, br); done <- struct{}{} }()
+			go func() { _, _ = io.Copy(c, upstream); done <- struct{}{} }()
+			<-done
+		}(conn)
+	}
+}
+
+// TestCLIIntegrationPastesResults exercises the full requested flow against a
+// mock paste service: a healthy config is saved to the results file after the
+// run, the file is uploaded, and the returned link is printed.
+func TestCLIIntegrationPastesResults(t *testing.T) {
+	var mu sync.Mutex
+	var pastedBody string
+	var pasteHits int
+	pasteSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		pastedBody = string(body)
+		pasteHits++
+		mu.Unlock()
+		w.WriteHeader(http.StatusCreated)
+		fmt.Fprintln(w, "https://paste.rs/xyz789")
+	}))
+	defer pasteSrv.Close()
+
+	targetSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer targetSrv.Close()
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to start the local SOCKS5 proxy: %v", err)
+	}
+	defer ln.Close()
+	go serveSOCKS5(ln)
+
+	proxyLink := "socks5://" + ln.Addr().String() + "#local"
+	subSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprintln(w, proxyLink)
+	}))
+	defer subSrv.Close()
+
+	tmpDir := t.TempDir()
+	binPath := filepath.Join(tmpDir, "v2pingo_paste_test.exe")
+	buildCmd := exec.Command(goExecutable(), "build", "-o", binPath, ".")
+	if buildOut, err := buildCmd.CombinedOutput(); err != nil {
+		t.Fatalf("failed to build test binary: %v\nOutput: %s", err, string(buildOut))
+	}
+
+	cmd := exec.Command(binPath,
+		"-default-subs=false",
+		"-sub", subSrv.URL,
+		"-url", targetSrv.URL,
+		"-c", "1",
+		"-timeout", "10s",
+		"-paste-url", pasteSrv.URL,
+	)
+	// Isolate the results/ directory so the test does not pollute the repo.
+	cmd.Dir = tmpDir
+
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("binary execution failed: %v\nOutput: %s", err, string(out))
+	}
+	outStr := string(out)
+
+	if !strings.Contains(outStr, "Paste link: https://paste.rs/xyz789") {
+		t.Errorf("expected the paste link to be printed, got:\n%s", outStr)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if pasteHits != 1 {
+		t.Errorf("expected exactly one paste upload, got %d", pasteHits)
+	}
+	if !strings.Contains(pastedBody, proxyLink) {
+		t.Errorf("expected the uploaded body to contain the healthy config %q, got: %q", proxyLink, pastedBody)
 	}
 }
 
@@ -121,7 +282,7 @@ func TestCLIIntegrationSubscriptionFile(t *testing.T) {
 		t.Fatalf("failed to build test binary: %v\nOutput: %s", err, string(buildOut))
 	}
 
-	cmd := exec.Command(binPath, "-sub-file", subFile, "-c", "2", "-timeout", "1s")
+	cmd := exec.Command(binPath, "-sub-file", subFile, "-c", "2", "-timeout", "1s", "-paste=false")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("binary execution failed: %v\nOutput: %s", err, string(out))
