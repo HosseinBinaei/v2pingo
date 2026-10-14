@@ -20,6 +20,13 @@ type Options struct {
 	AskPaste bool
 	// PasteEndpoint overrides the paste service URL; empty means paste.rs.
 	PasteEndpoint string
+	// FetchMode decides whether the subscription sources are downloaded afresh
+	// or reused from the cache directory.
+	FetchMode subscription.FetchMode
+	// CacheDir is the directory that keeps the fetched subscription sources; an
+	// empty directory disables caching, so nothing is read from or written to
+	// disk and every source is downloaded.
+	CacheDir string
 }
 
 // PasteDoneMsg carries the outcome of an on-demand paste upload.
@@ -53,8 +60,10 @@ func Run(subs []string, target string, workers int, timeout time.Duration, opts 
 }
 
 // startBackgroundRun executes fetch -> dedupe -> RunPool off the UI thread
-// and forwards every result with prog.Send (goroutine-safe in BubbleTea).
-func startBackgroundRun(prog *tea.Program, cfg FormConfig) {
+// and forwards every result with prog.Send (goroutine-safe in BubbleTea). The
+// subscription sources come from the cache directory or from GitHub according
+// to opts.FetchMode, which the caller resolved before the UI started.
+func startBackgroundRun(prog *tea.Program, cfg FormConfig, opts Options) {
 	go func() {
 		start := time.Now()
 		ctx, cancel := context.WithCancel(context.Background())
@@ -62,7 +71,7 @@ func startBackgroundRun(prog *tea.Program, cfg FormConfig) {
 		boundCancel = cancel
 		client := &http.Client{Timeout: 30 * time.Second}
 		fctx, fcancel := context.WithTimeout(ctx, 60*time.Second)
-		rawLinks := subscription.FetchSubscriptions(fctx, cfg.Subs, client)
+		rawLinks := subscription.FetchSubscriptions(fctx, cfg.Subs, client, opts.CacheDir, opts.FetchMode)
 		fcancel()
 		resultsFile := runner.DefaultResultsFile()
 		checkpointFile := resultsFile + ".checkpoint"

@@ -8,6 +8,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"v2pingo/pkg/paste"
+	"v2pingo/pkg/subscription"
 	"v2pingo/pkg/types"
 )
 
@@ -341,6 +342,25 @@ func TestModel_CtrlCOnRunningCancelsInsteadOfQuitting(t *testing.T) {
 	}
 	if !cancelled {
 		t.Fatalf("expected Ctrl+C to invoke the stored run cancel func")
+	}
+}
+
+func TestModel_FormShowsWhereSourcesComeFrom(t *testing.T) {
+	fresh := NewModel([]string{"https://a.com/s"}, "https://x.com", 20, 15*time.Second)
+	if view := fresh.View(); !strings.Contains(view, "fresh download") {
+		t.Fatalf("expected the default form to announce a fresh download, got %q", view)
+	}
+
+	cached := fresh
+	cached.opts = Options{FetchMode: subscription.FetchCache, CacheDir: "my-cache"}
+	if view := cached.View(); !strings.Contains(view, "cached files in my-cache") {
+		t.Fatalf("expected the form to announce the cached sources, got %q", view)
+	}
+
+	unnamed := fresh
+	unnamed.opts = Options{FetchMode: subscription.FetchCache}
+	if view := unnamed.View(); !strings.Contains(view, "sources: cached subscription files") {
+		t.Fatalf("expected the cached-sources line without a directory, got %q", view)
 	}
 }
 

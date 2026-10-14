@@ -320,7 +320,7 @@ func TestFetchSubscriptions(t *testing.T) {
 			ts500.URL,
 		}
 
-		links := FetchSubscriptions(ctx, urls, nil)
+		links := FetchSubscriptions(ctx, urls, nil, "", FetchNetwork)
 		expectedCount := 3 // 2 from ts1 + 1 from ts2
 		if len(links) != expectedCount {
 			t.Fatalf("FetchSubscriptions returned %d links, want %d: %v", len(links), expectedCount, links)
@@ -335,7 +335,7 @@ func TestFetchSubscriptions(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel() // cancel immediately
 
-		links := FetchSubscriptions(ctx, []string{ts1.URL}, nil)
+		links := FetchSubscriptions(ctx, []string{ts1.URL}, nil, "", FetchNetwork)
 		if len(links) != 0 {
 			t.Errorf("expected 0 links on canceled context, got %d", len(links))
 		}

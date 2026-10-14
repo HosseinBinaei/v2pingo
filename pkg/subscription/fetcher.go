@@ -172,8 +172,17 @@ func DecodePayload(content []byte) []string {
 	return results
 }
 
-// FetchSubscriptions fetches multiple subscription URLs concurrently/sequentially and extracts proxy links.
-func FetchSubscriptions(ctx context.Context, urls []string, client *http.Client) []string {
+// FetchSubscriptions fetches multiple subscription URLs sequentially and
+// extracts their proxy share links. Sources that fail are reported as warnings
+// without aborting the run.
+//
+// dir is the directory that keeps a copy of every downloaded payload so a later
+// run can reuse it: with FetchCache the cached payloads are used and only
+// sources missing from the cache are downloaded, while with FetchNetwork every
+// source is downloaded and stale cache entries are pruned so the directory
+// mirrors the current source list. An empty dir disables caching entirely —
+// nothing is read from or written to disk.
+func FetchSubscriptions(ctx context.Context, urls []string, client *http.Client, dir string, mode FetchMode) []string {
 	if client == nil {
 		client = &http.Client{
 			Timeout: 30 * time.Second,
@@ -181,6 +190,7 @@ func FetchSubscriptions(ctx context.Context, urls []string, client *http.Client)
 	}
 
 	var allLinks []string
+	keep := make(map[string]bool)
 	for _, rawURL := range urls {
 		select {
 		case <-ctx.Done():
@@ -193,37 +203,65 @@ func FetchSubscriptions(ctx context.Context, urls []string, client *http.Client)
 			continue
 		}
 
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, normURL, nil)
+		if dir != "" {
+			keep[CacheFileName(normURL)] = true
+			if mode == FetchCache {
+				if payload, ok := readCachedSubscription(dir, normURL); ok {
+					allLinks = append(allLinks, DecodePayload(payload)...)
+					continue
+				}
+				log.Printf("warn: %s is missing from the cache, downloading it", normURL)
+			}
+		}
+
+		body, err := fetchPayload(ctx, client, normURL)
 		if err != nil {
-			log.Printf("warn: failed to create request for %s: %v", normURL, err)
+			log.Printf("warn: %v", err)
 			continue
 		}
-		req.Header.Set("User-Agent", "v2rayN/6.0")
-
-		resp, err := client.Do(req)
-		if err != nil {
-			log.Printf("warn: failed to fetch subscription %s: %v", normURL, err)
-			continue
+		if dir != "" {
+			if err := writeCachedSubscription(dir, normURL, body); err != nil {
+				log.Printf("warn: %v", err)
+			}
 		}
+		allLinks = append(allLinks, DecodePayload(body)...)
+	}
 
-		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-			log.Printf("warn: subscription %s returned status %d", normURL, resp.StatusCode)
-			resp.Body.Close()
-			continue
+	if dir != "" && mode == FetchNetwork {
+		if err := pruneCache(dir, keep); err != nil {
+			log.Printf("warn: %v", err)
 		}
-
-		body, err := io.ReadAll(resp.Body)
-		resp.Body.Close()
-		if err != nil {
-			log.Printf("warn: failed to read response body for %s: %v", normURL, err)
-			continue
-		}
-
-		extracted := DecodePayload(body)
-		allLinks = append(allLinks, extracted...)
 	}
 
 	return allLinks
+}
+
+// fetchPayload downloads one normalized subscription URL and returns its body.
+// A transport error, a non-2xx status and a failed body read are all reported as
+// an error so callers can warn and continue with the remaining sources.
+func fetchPayload(ctx context.Context, client *http.Client, normURL string) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, normURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request for %s: %w", normURL, err)
+	}
+	req.Header.Set("User-Agent", "v2rayN/6.0")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch subscription %s: %w", normURL, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("subscription %s returned status %d", normURL, resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response body for %s: %w", normURL, err)
+	}
+
+	return body, nil
 }
 
 func isProxyLink(s string) bool {

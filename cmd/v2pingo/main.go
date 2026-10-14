@@ -52,8 +52,15 @@ func main() {
 	tuiFlag := flag.Bool("tui", true, "Launch interactive terminal UI")
 	pasteFlag := flag.Bool("paste", true, "Ask whether to upload the saved results file to paste.rs")
 	pasteURLFlag := flag.String("paste-url", paste.DefaultEndpoint, "Paste service endpoint used by -paste")
+	cacheFlag := flag.Bool("cache", true, "Ask whether to reuse the cached subscription files (false disables the cache)")
+	cacheDirFlag := flag.String("cache-dir", subscription.DefaultCacheDir, "Directory that keeps the fetched subscription files")
 
 	flag.Parse()
+
+	// Every interactive question shares one buffered reader so no buffered line
+	// is lost between the cache question and the paste questions.
+	reader := bufio.NewReader(os.Stdin)
+	cacheDir := resolveCacheDir(*cacheDirFlag, *cacheFlag)
 
 	if *tuiFlag && isTerminal() {
 		subFilePath := subscription.ResolveSubscriptionFile(*subFileFlag)
@@ -62,6 +69,8 @@ func main() {
 		if err := runTUI(allSubs, *targetURLFlag, *concurrencyFlag, *timeoutFlag, tui.Options{
 			AskPaste:      *pasteFlag,
 			PasteEndpoint: *pasteURLFlag,
+			FetchMode:     resolveFetchMode(reader, cacheDir),
+			CacheDir:      cacheDir,
 		}); err != nil {
 			fmt.Fprintf(os.Stderr, "TUI error: %v\n", err)
 			os.Exit(1)
@@ -88,13 +97,17 @@ func main() {
 		os.Exit(1)
 	}
 
+	// The cache question is asked once, before any source is fetched, so the run
+	// either reuses the files of a previous run or refreshes them from GitHub.
+	mode := resolveFetchMode(reader, cacheDir)
+
 	fmt.Printf("Fetching subscriptions from %d sources...\n", len(subURLs))
 	httpClient := &http.Client{
 		Timeout: 30 * time.Second,
 	}
 
 	fetchCtx, fetchCancel := context.WithTimeout(context.Background(), 60*time.Second)
-	rawLinks := subscription.FetchSubscriptions(fetchCtx, subURLs, httpClient)
+	rawLinks := subscription.FetchSubscriptions(fetchCtx, subURLs, httpClient, cacheDir, mode)
 	fetchCancel()
 
 	fmt.Printf("Extracted %d raw proxy share links.\n", len(rawLinks))
@@ -129,8 +142,42 @@ func main() {
 	fmt.Printf("Healthy links appended to %s (checkpoint: %s)\n", resultsFile, checkpointFile)
 
 	if *pasteFlag {
-		promptPasteUpload(resultsFile, *pasteURLFlag)
+		promptPasteUpload(reader, resultsFile, *pasteURLFlag)
 	}
+}
+
+// resolveCacheDir returns the directory used for cached subscription sources, or
+// "" when -cache=false disables the cache for this run.
+func resolveCacheDir(dir string, enabled bool) string {
+	if !enabled {
+		return ""
+	}
+	return subscription.ResolveCacheDir(dir)
+}
+
+// resolveFetchMode decides where the subscription sources of this run come from.
+// An empty cacheDir (the cache disabled with -cache=false) always downloads the
+// sources; otherwise the question is asked only when the cache directory already
+// holds at least one source — without a cache a download is the only option — and
+// only an explicit y / yes refreshes the sources from GitHub, while Enter and
+// every other answer reuses the cached files.
+func resolveFetchMode(reader *bufio.Reader, cacheDir string) subscription.FetchMode {
+	if cacheDir == "" {
+		return subscription.FetchNetwork
+	}
+
+	stats := subscription.InspectCache(cacheDir)
+	if stats.Files == 0 {
+		fmt.Printf("No cached subscription files in %s; fetching fresh copies from the source links.\n", cacheDir)
+		return subscription.FetchNetwork
+	}
+
+	fmt.Printf("Cached subscription files in %s: %d file(s), newest %s.\n", stats.Dir, stats.Files, stats.Updated.Format("2006-01-02 15:04:05"))
+	if askYesNo(reader, subscription.CachePrompt) {
+		return subscription.FetchNetwork
+	}
+	fmt.Println("Using the cached subscription files.")
+	return subscription.FetchCache
 }
 
 // promptPasteUpload asks the user whether to publish the saved results file and
@@ -141,14 +188,13 @@ func main() {
 // A failed upload is reported and then the user is asked whether to try again;
 // declining retry (or any non-affirmative answer) ends the process with the
 // results still saved locally.
-func promptPasteUpload(path, endpoint string) {
+func promptPasteUpload(reader *bufio.Reader, path, endpoint string) {
 	if _, err := os.Stat(path); err != nil {
 		return // no results file was saved, nothing to publish
 	}
 
-	// One reader is reused for every question so no buffered line is lost
+	// The reader is shared with every other question so no buffered line is lost
 	// between the initial prompt and a retry prompt.
-	reader := bufio.NewReader(os.Stdin)
 	if !askYesNo(reader, paste.Prompt) {
 		fmt.Println("Skipped paste upload.")
 		return

@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"v2pingo/pkg/paste"
+	"v2pingo/pkg/subscription"
 	"v2pingo/pkg/types"
 )
 
@@ -151,7 +152,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	case StartTestsMsg:
 		if bound != nil {
-			startBackgroundRun(bound, msg.Cfg)
+			startBackgroundRun(bound, msg.Cfg, m.opts)
 		}
 		return m, nil
 	case TotalMsg:
@@ -288,6 +289,7 @@ func (m Model) View() string {
 	default:
 		var b strings.Builder
 		b.WriteString("v2pingo — Tab moves, Enter starts, Ctrl+C quits\n")
+		b.WriteString(m.sourceLine() + "\n")
 		for _, in := range m.inputs {
 			b.WriteString(in.View() + "\n")
 		}
@@ -300,3 +302,15 @@ func (m Model) View() string {
 
 // Init starts the cursor blink for text inputs.
 func (m Model) Init() tea.Cmd { return textinput.Blink }
+
+// sourceLine tells the form where the subscription sources of the next run come
+// from, so the question answered before the UI started stays visible.
+func (m Model) sourceLine() string {
+	if m.opts.FetchMode != subscription.FetchCache {
+		return "sources: fresh download from the subscription URLs"
+	}
+	if m.opts.CacheDir == "" {
+		return "sources: cached subscription files"
+	}
+	return "sources: cached files in " + m.opts.CacheDir
+}

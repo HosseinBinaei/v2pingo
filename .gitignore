@@ -14,6 +14,9 @@ results*.md
 *.out
 type-of-results/
 
+# Fetched subscription sources
+cache/
+
 # Editor / IDE
 .vscode/
 .idea/

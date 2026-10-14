@@ -19,10 +19,11 @@ Built in Go for Windows (single runnable `.exe`), it tests configurations direct
   - **WireGuard:** `wireguard://` and `wg://` links (private key, `publickey`, `presharedkey`, `address`, `mtu`, `reserved`). WireGuard is tested through a sing-box **endpoint**, which is the only form sing-box still supports since the legacy outbound was removed.
 - **Flexible Subscription Handling:**
   - Subscription URLs are read from [`sub-input.txt`](sub-input.txt) in the project root, one URL per line, so the list can be edited without rebuilding.
+  - Every source is cached in [`cache/`](#subscription-cache-cache): before a run starts you are asked whether to refresh the files from GitHub or reuse the copies downloaded earlier.
   - Automatically rewrites GitHub `/blob/` URLs to `raw.githubusercontent.com`.
   - Decodes raw plain-text links, single/multiline Base64 (standard and URL-safe, padded and unpadded), and mixed subscription payloads.
   - Normalizes and deduplicates duplicate configurations (ignoring remark `#fragments` for uniqueness).
-  - Resilient network fetching: failed subscriptions emit warnings without aborting the test batch.
+  - Resilient network fetching: failed subscriptions emit warnings without aborting the test batch, and a failed refresh keeps the cached copy of that source.
 - **Controlled Concurrency & Timeouts:**
   - Fixed worker pool (default: `20` concurrent workers).
   - Strict per-test context timeouts (default: `15s`) covering handshake, connection setup, and HTTP GET request.
@@ -63,6 +64,8 @@ Reads the subscription URLs listed in `sub-input.txt`, extracts all supported co
 ```powershell
 .\v2pingo.exe
 ```
+
+Before anything is fetched the tool asks whether to refresh the subscription files from GitHub or reuse the copies cached in `cache/` by a previous run — see [Subscription Cache](#subscription-cache-cache).
 
 ### 2. Custom Target URL & Concurrency
 Test against Google with 30 concurrent workers and a 10-second timeout:
@@ -135,6 +138,33 @@ Add or remove lines to change which subscriptions are fetched — every remainin
 
 ---
 
+## Subscription Cache (`cache/`)
+
+Every subscription source is downloaded once and stored in the `cache/` directory, one file per source URL. Nothing is fetched and no test starts before the cache question is answered, so a run either refreshes the sources from GitHub or reuses the files of an earlier run.
+
+The very first run finds no cache and downloads without asking:
+
+```text
+No cached subscription files in cache; fetching fresh copies from the source links.
+```
+
+Every later run shows what is available and asks:
+
+```text
+Cached subscription files in cache: 13 file(s), newest 2026-10-15 09:12:44.
+Fetch fresh copies from GitHub and refresh the cached subscription files? [y/N]:
+```
+
+- Answer `y` / `yes`, `Y` or `YES` to download every source again and refresh the cache with the new payloads. Cached copies of sources that are no longer listed in `sub-input.txt` are removed, so after a refresh the directory mirrors the current source list; a source that fails to download keeps its previous file for a later run.
+- **Any other answer** — `n`, Enter, or a non-interactive run without an interactive prompt — reuses the cached files and prints `Using the cached subscription files.` Sources that are still missing from the cache are downloaded once and added to it.
+- Each cache file is named after its source (`host-path-<hash>.txt`), so a source always maps to the same file and two different sources can never collide.
+- The question is skipped when `cache/` is still empty, and `-cache=false` disables the cache entirely: every run downloads fresh copies and nothing is read from or written to disk.
+- Store the cache somewhere else with `-cache-dir <path>`. A `cache` directory next to `v2pingo.exe` is also found when the tool is started from another working directory.
+- The directory only holds downloaded subscription payloads, it is ignored by Git, and you can delete it at any time to start from scratch.
+- In the TUI the question is asked before the form appears, and the form shows where the sources of the run will come from (`sources: cached files in cache` or `sources: fresh download from the subscription URLs`).
+
+---
+
 ## CLI Options
 
 | Flag | Type | Default | Description |
@@ -145,6 +175,8 @@ Add or remove lines to change which subscriptions are fetched — every remainin
 | `-default-subs` | `bool` | `true` | Include the subscription URLs listed in the subscription file. |
 | `-sub-file` | `string` | `sub-input.txt` | Path to the subscription list file (one URL per line). |
 | `-sub` | `string` | *(empty)* | Custom subscription URL(s) (repeatable or comma-separated). |
+| `-cache` | `bool` | `true` | Ask whether to reuse the cached subscription files; `false` disables the cache and always downloads fresh copies. |
+| `-cache-dir` | `string` | `cache` | Directory that keeps the fetched subscription files. |
 | `-v`, `-verbose` | `bool` | `false` | Enable verbose output (prints failed tests). |
 | `-paste` | `bool` | `true` | Ask whether to upload the saved results file to the paste service (`false` never asks). |
 | `-paste-url` | `string` | `https://paste.rs/` | Paste service endpoint used when `-paste` is enabled. |
@@ -213,6 +245,9 @@ go test -v ./...
 
 ```
 sub-input.txt (one URL per line) + custom -sub URLs
+       │
+       ▼
+ [Source Cache]          ──► Reuse cache/ … or refresh it from GitHub (asked first)
        │
        ▼
  [Fetcher & Normalizer]  ──► Plain / Base64 decode, GitHub blob rewrite

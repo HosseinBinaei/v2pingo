@@ -15,6 +15,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"v2pingo/pkg/subscription"
 )
 
 // goExecutable returns the Go tool used to build the integration test binary.
@@ -84,6 +86,8 @@ func TestCLIIntegration(t *testing.T) {
 		"-v",
 		// Keep the integration test offline: no paste.rs upload attempt.
 		"-paste=false",
+		// -cache=false disables the cache, so the test writes nothing to the repository.
+		"-cache=false",
 	)
 
 	out, err := cmd.CombinedOutput()
@@ -483,6 +487,148 @@ func TestCLIIntegrationPasteRetryDeclined(t *testing.T) {
 	}
 }
 
+// TestResolveFetchMode covers the cache question: a disabled cache and an empty
+// cache directory download the sources, an explicit y refreshes them from GitHub,
+// and every other answer reuses the cached files.
+func TestResolveFetchMode(t *testing.T) {
+	if mode := resolveFetchMode(bufio.NewReader(strings.NewReader("y\n")), ""); mode != subscription.FetchNetwork {
+		t.Errorf("a disabled cache must download the sources, got mode %v", mode)
+	}
+
+	empty := t.TempDir()
+	if mode := resolveFetchMode(bufio.NewReader(strings.NewReader("y\n")), empty); mode != subscription.FetchNetwork {
+		t.Errorf("an empty cache must be filled from the network, got mode %v", mode)
+	}
+
+	cacheDir := t.TempDir()
+	url := "https://example.com/one.txt"
+	if err := os.WriteFile(filepath.Join(cacheDir, subscription.CacheFileName(url)), []byte("vless://a@1.1.1.1:443#a"), 0644); err != nil {
+		t.Fatalf("failed to write a cached source: %v", err)
+	}
+
+	if mode := resolveFetchMode(bufio.NewReader(strings.NewReader("y\n")), cacheDir); mode != subscription.FetchNetwork {
+		t.Errorf("answering yes must refresh the sources from GitHub, got mode %v", mode)
+	}
+	for _, answer := range []string{"", "n\n", "x\n", "\n"} {
+		if mode := resolveFetchMode(bufio.NewReader(strings.NewReader(answer)), cacheDir); mode != subscription.FetchCache {
+			t.Errorf("answer %q must reuse the cached files, got mode %v", answer, mode)
+		}
+	}
+}
+
+// TestResolveCacheDir covers -cache/-cache-dir wiring: disabling the cache yields
+// no directory at all, so nothing is read from or written to disk.
+func TestResolveCacheDir(t *testing.T) {
+	if got := resolveCacheDir("cache", false); got != "" {
+		t.Errorf("disabled cache must resolve to no directory, got %q", got)
+	}
+	existing := t.TempDir()
+	if got := resolveCacheDir(existing, true); got != existing {
+		t.Errorf("resolveCacheDir(%q) = %q, want %q", existing, got, existing)
+	}
+	if got := resolveCacheDir("", true); got != subscription.DefaultCacheDir {
+		t.Errorf("an empty -cache-dir must fall back to %q, got %q", subscription.DefaultCacheDir, got)
+	}
+}
+
+// TestCLIIntegrationSubscriptionCache covers the source cache end to end: the
+// first run downloads the sources and caches them, a later run reuses the cached
+// copy without contacting the source, and answering yes refreshes GitHub copies
+// and replaces the cached payload.
+func TestCLIIntegrationSubscriptionCache(t *testing.T) {
+	var mu sync.Mutex
+	payload := "vless://00000000-0000-0000-0000-000000000000@127.0.0.1:1080?type=tcp#CachedOne\n"
+	hits := 0
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		hits++
+		body := payload
+		mu.Unlock()
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(body))
+	}))
+	defer ts.Close()
+
+	tmpDir := t.TempDir()
+	binPath := pasteTestBinary(t, "v2pingo_cache_test.exe")
+	cachedFile := filepath.Join(tmpDir, "cache", subscription.CacheFileName(ts.URL))
+
+	run := func(stdin string) string {
+		t.Helper()
+		cmd := exec.Command(binPath,
+			"-default-subs=false",
+			"-sub", ts.URL,
+			"-c", "1",
+			"-timeout", "1s",
+			"-paste=false",
+		)
+		cmd.Dir = tmpDir
+		cmd.Stdin = strings.NewReader(stdin)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("binary execution failed: %v\nOutput: %s", err, string(out))
+		}
+		return string(out)
+	}
+	hitsNow := func() int {
+		mu.Lock()
+		defer mu.Unlock()
+		return hits
+	}
+	cachedBody := func() string {
+		t.Helper()
+		body, err := os.ReadFile(cachedFile)
+		if err != nil {
+			t.Fatalf("expected a cached source at %s: %v", cachedFile, err)
+		}
+		return string(body)
+	}
+
+	// First run: nothing is cached yet, so the source is downloaded and stored.
+	out := run("")
+	if !strings.Contains(out, "No cached subscription files") {
+		t.Fatalf("expected the first run to report an empty cache, got:\n%s", out)
+	}
+	if !strings.Contains(cachedBody(), "CachedOne") {
+		t.Fatalf("expected the downloaded payload to be cached, got %q", cachedBody())
+	}
+	firstHits := hitsNow()
+	if firstHits != 1 {
+		t.Fatalf("expected exactly one source download on the first run, got %d", firstHits)
+	}
+
+	// Second run: the cached copy is reused, so the source is never contacted and
+	// the newer payload the server would serve is ignored.
+	mu.Lock()
+	payload = "vless://11111111-1111-1111-1111-111111111111@127.0.0.1:1080?type=tcp#FreshTwo\n"
+	mu.Unlock()
+	out = run("n\n")
+	if !strings.Contains(out, subscription.CachePrompt) {
+		t.Fatalf("expected the cache question when a cache exists, got:\n%s", out)
+	}
+	if !strings.Contains(out, "Using the cached subscription files.") {
+		t.Fatalf("expected the cached files to be announced, got:\n%s", out)
+	}
+	if got := hitsNow(); got != firstHits {
+		t.Fatalf("reusing the cache must not contact the source, hits %d -> %d", firstHits, got)
+	}
+	if !strings.Contains(cachedBody(), "CachedOne") {
+		t.Fatalf("reusing the cache must not rewrite the cached payload, got %q", cachedBody())
+	}
+
+	// Third run: answering yes downloads fresh copies and replaces the cache.
+	out = run("y\n")
+	if !strings.Contains(out, "Extracted 1 raw proxy share links.") {
+		t.Fatalf("expected the refreshed run to extract the new link, got:\n%s", out)
+	}
+	if got := hitsNow(); got != firstHits+1 {
+		t.Fatalf("answering yes must download the source again, hits %d -> %d", firstHits, got)
+	}
+	if !strings.Contains(cachedBody(), "FreshTwo") {
+		t.Fatalf("expected the cache to be replaced by the fresh payload, got %q", cachedBody())
+	}
+}
+
 func TestCLIIntegrationSubscriptionFile(t *testing.T) {
 	// Create mock server for subscription endpoint
 	mockSubContent := "vless://00000000-0000-0000-0000-000000000000@127.0.0.1:1080?type=tcp#FileVLESS\n"
@@ -507,7 +653,7 @@ func TestCLIIntegrationSubscriptionFile(t *testing.T) {
 		t.Fatalf("failed to build test binary: %v\nOutput: %s", err, string(buildOut))
 	}
 
-	cmd := exec.Command(binPath, "-sub-file", subFile, "-c", "2", "-timeout", "1s", "-paste=false")
+	cmd := exec.Command(binPath, "-sub-file", subFile, "-c", "2", "-timeout", "1s", "-paste=false", "-cache=false")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("binary execution failed: %v\nOutput: %s", err, string(out))

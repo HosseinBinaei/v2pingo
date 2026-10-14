@@ -36,7 +36,39 @@ Add a line to include another subscription, delete a line to drop one. Every rem
 
 ---
 
-## 3. Default Test
+## 3. Subscription Cache (`cache/`) — asked before every run
+
+The subscription sources are downloaded once and kept in the `cache/` directory, one file per source URL. Before any source is fetched, `v2pingo` asks where the run should take them from:
+
+* **First run** — the cache is empty, so the sources are downloaded and stored without a question:
+
+```text
+No cached subscription files in cache; fetching fresh copies from the source links.
+```
+
+* **Later runs** — the question is asked before the tests start:
+
+```text
+Cached subscription files in cache: 13 file(s), newest 2026-10-15 09:12:44.
+Fetch fresh copies from GitHub and refresh the cached subscription files? [y/N]:
+```
+
+Answer `y`, `Y`, `yes` or `YES` to download fresh copies from GitHub and refresh the cache with them. **Every other answer** — `n`, Enter, or a run without an interactive prompt — reuses the cached files and prints `Using the cached subscription files.`; a source that is still missing from the cache is downloaded once and added to it.
+
+A refresh replaces the cache: cached copies of sources that were removed from `sub-input.txt` are deleted, so the directory mirrors the current source list. A source that cannot be downloaded keeps its previous cached file so a later run can still use it.
+
+Disable the cache for a run — the question is skipped, every source is downloaded and nothing is written to disk — or keep the cache in another directory:
+
+```powershell
+.\v2pingo.exe -cache=false
+.\v2pingo.exe -cache-dir "D:\v2pingo-cache"
+```
+
+> The cache holds only downloaded subscription payloads; it is ignored by Git and can be deleted at any time. In the TUI the question is asked before the form opens, and the form then shows `sources: cached files in cache` or `sources: fresh download from the subscription URLs`.
+
+---
+
+## 4. Default Test
 
 Run the simplest command to test using the subscription file, the default target URL (`https://x.com`), default concurrency (`20`), and default timeout (`15s`):
 
@@ -46,7 +78,7 @@ Run the simplest command to test using the subscription file, the default target
 
 ---
 
-## 4. Custom Target
+## 5. Custom Target
 
 Test connectivity to a specific website or domain:
 
@@ -59,7 +91,7 @@ Test connectivity to a specific website or domain:
 
 ---
 
-## 5. Custom Concurrency & Timeout
+## 6. Custom Concurrency & Timeout
 
 Adjust worker count and request timeout for your network conditions:
 
@@ -74,7 +106,7 @@ Adjust worker count and request timeout for your network conditions:
 
 ---
 
-## 6. Custom Subscriptions
+## 7. Custom Subscriptions
 
 Disable the subscription file and supply your own subscription URLs instead.
 
@@ -92,7 +124,7 @@ Disable the subscription file and supply your own subscription URLs instead.
 
 ---
 
-## 7. Verbose Mode
+## 8. Verbose Mode
 
 Enable verbose output to view failed proxy tests alongside sanitized error reasons:
 
@@ -102,7 +134,7 @@ Enable verbose output to view failed proxy tests alongside sanitized error reaso
 
 ---
 
-## 8. Results File
+## 9. Results File
 
 Configurations that return an **HTTP 200** status code are automatically saved at the end of execution (or upon pressing Ctrl+C) to a Markdown file:
 
@@ -114,7 +146,7 @@ The file contains the working proxy configurations saved as original share links
 
 ---
 
-## 9. Shareable Link (paste.rs) — asks first
+## 10. Shareable Link (paste.rs) — asks first
 
 Once the results file is saved, `v2pingo` **asks** whether you want a shareable link:
 
@@ -153,7 +185,7 @@ Details:
 
 ---
 
-## 10. Stop / Ctrl+C
+## 11. Stop / Ctrl+C
 
 Pressing **Ctrl+C** during a test run will:
 
@@ -165,7 +197,7 @@ Pressing **Ctrl+C** during a test run will:
 
 ---
 
-## 11. Practical Recommended Examples
+## 12. Practical Recommended Examples
 
 **Quick default test:**
 ```powershell
@@ -203,11 +235,17 @@ Pressing **Ctrl+C** during a test run will:
 .\v2pingo.exe -paste=false
 ```
 
+**Reuse the cached subscriptions (answer Enter) or always refresh them:**
+```powershell
+.\v2pingo.exe
+.\v2pingo.exe -cache=false
+```
+
 ---
 
-## 12. Important Notes
+## 13. Important Notes
 
-* **Internet Access:** `v2pingo` requires an active internet connection to fetch subscription lists and perform target URL checks.
+* **Internet Access:** `v2pingo` requires an active internet connection to fetch subscription lists and perform target URL checks. Subscription sources are cached in `cache/` and reused whenever the cache question is not answered with `y`/`yes`, so a run from the cache only needs the internet for the target URL checks; `-cache=false` skips the cache entirely and downloads fresh copies every time.
 * **Target-Dependent Results:** A proxy may succeed for one target URL (e.g., `https://google.com`) but fail or time out for another.
 * **HTTP 200 Verification:** An **HTTP 200** response confirms the proxy successfully connected, proxied the traffic, and received a standard successful HTTP response from the target server.
 * **HTTP 403 / 404 / Non-200 Status:** Status codes like 403 or 404 mean the proxy connection itself succeeded, but the target server or cloudflare/CDN returned an error response.
