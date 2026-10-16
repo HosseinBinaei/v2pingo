@@ -7,8 +7,8 @@ import (
 
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
-	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"v2pingo/pkg/paste"
 	"v2pingo/pkg/subscription"
 	"v2pingo/pkg/types"
@@ -22,6 +22,14 @@ const (
 	ScreenRunning
 	ScreenDone
 )
+
+// formLabels names the four form fields, in focus order.
+var formLabels = []string{
+	"Extra subscription URL",
+	"Target URL",
+	"Workers (1-200)",
+	"Timeout",
+}
 
 // ResultMsg carries one finished proxy test into the BubbleTea loop.
 type ResultMsg struct{ Res types.TestResult }
@@ -52,6 +60,7 @@ type Model struct {
 	focus          int
 	formErr        string
 	subs           []string
+	cfg            FormConfig
 	total          int
 	tested         int
 	succeeded      int
@@ -69,7 +78,8 @@ type Model struct {
 	opts           Options
 	start          time.Time
 	spinner        spinner.Model
-	viewport       viewport.Model
+	width          int
+	height         int
 }
 
 // NewModel builds the form screen. subs are the preloaded subscription lines
@@ -89,19 +99,28 @@ func NewModel(subs []string, target string, workers int, timeout time.Duration) 
 		ti := textinput.New()
 		ti.Placeholder = f.placeholder
 		ti.SetValue(f.value)
+		ti.Width = 48
 		if i == 0 {
 			ti.Focus()
 		}
 		m.inputs = append(m.inputs, ti)
 	}
 	m.spinner = spinner.New()
-	m.viewport = viewport.New(60, 10)
+	m.spinner.Spinner = spinner.Dot
 	return m
 }
 
 // Update routes messages and keys to the active screen.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		m.height = msg.Height
+		return m, nil
+	case spinner.TickMsg:
+		var cmd tea.Cmd
+		m.spinner, cmd = m.spinner.Update(msg)
+		return m, cmd
 	case tea.KeyMsg:
 		// The done screen may be waiting for a y/N answer; resolve it first so
 		// ordinary keys never fall through to navigation while it is pending.
@@ -129,6 +148,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, nil
 				}
 				m.formErr = ""
+				m.cfg = cfg
 				m.screen = ScreenRunning
 				m.start = time.Now()
 				return m, func() tea.Msg { return StartTestsMsg{Cfg: cfg} }
@@ -164,12 +184,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.succeeded++
 			if msg.Res.StatusCode >= 200 && msg.Res.StatusCode < 300 && msg.Res.Config.RawLink != "" {
 				m.links = append(m.links, msg.Res.Config.RawLink)
-				line := fmt.Sprintf("[ok] %s", strings.TrimSpace(msg.Res.Config.RawLink))
-				m.recent = append(m.recent, line)
-				if len(m.recent) > 10 {
-					m.recent = m.recent[len(m.recent)-10:]
+				m.recent = append(m.recent, m.resultLine(msg.Res))
+				if len(m.recent) > 8 {
+					m.recent = m.recent[len(m.recent)-8:]
 				}
-				m.viewport.SetContent(strings.Join(m.recent, "\n"))
 			}
 			return m, nil
 		}
@@ -253,55 +271,260 @@ func (m Model) cancelRun() (tea.Model, tea.Cmd) {
 	return m, func() tea.Msg { return partial }
 }
 
-// View renders the active screen. Full styling is a follow-up; this keeps
-// the state machine testable and the screens readable.
+// resultLine renders one live-log row. It deliberately shows only protocol,
+// host:port, latency and status — never the share link — so credentials stay out
+// of the terminal, matching the CLI reporter's sanitized output.
+func (m Model) resultLine(res types.TestResult) string {
+	return okStyle.Render("✓ ") +
+		valueStyle.Render(fmt.Sprintf("%-10s", res.Config.Protocol)) +
+		dimStyle.Render(res.Config.Target()) + "  " +
+		softStyle.Render(fmt.Sprintf("%6s", res.Latency.Round(time.Millisecond))) + "  " +
+		okStyle.Render(fmt.Sprintf("HTTP %d", res.StatusCode))
+}
+
+// View renders the active screen.
 func (m Model) View() string {
 	switch m.screen {
 	case ScreenRunning:
-		return fmt.Sprintf("Testing %d/%d  ok=%d fail=%d  (Ctrl+C/q=cancel+save)\n%s", m.tested, m.total, m.succeeded, m.failed, m.viewport.View())
+		return m.viewRunning()
 	case ScreenDone:
-		var b strings.Builder
-		fmt.Fprintf(&b, "Done: tested=%d success=%d failed=%d in %s\n", m.tested, m.succeeded, m.failed, m.elapsed.Round(time.Second))
-		fmt.Fprintf(&b, "Saved: %s\n", m.savedFile)
-		switch {
-		case m.pasteUploading:
-			b.WriteString("Uploading to paste.rs...\n")
-		case m.pastePrompt && m.pasteRetry:
-			b.WriteString("Paste upload failed: " + m.pasteErr + "\n")
-			b.WriteString(paste.RetryPrompt + "\n")
-		case m.pastePrompt:
-			b.WriteString(paste.Prompt + "\n")
-		case m.pasteLink != "":
-			b.WriteString("Paste: " + m.pasteLink + "\n")
-		}
-		if m.notice != "" {
-			b.WriteString(m.notice + "\n")
-		}
-		switch {
-		case m.pastePrompt && m.pasteRetry:
-			b.WriteString("(y = retry, any other key = give up, q = quit)")
-		case m.pastePrompt:
-			b.WriteString("(y = upload, any other key = skip, q = quit)")
-		default:
-			b.WriteString("(Enter=form q=quit)")
-		}
-		return b.String()
+		return m.viewDone()
 	default:
-		var b strings.Builder
-		b.WriteString("v2pingo — Tab moves, Enter starts, Ctrl+C quits\n")
-		b.WriteString(m.sourceLine() + "\n")
-		for _, in := range m.inputs {
-			b.WriteString(in.View() + "\n")
-		}
-		if m.formErr != "" {
-			b.WriteString("error: " + m.formErr + "\n")
-		}
-		return b.String()
+		return m.viewForm()
 	}
 }
 
-// Init starts the cursor blink for text inputs.
-func (m Model) Init() tea.Cmd { return textinput.Blink }
+// Init starts the cursor blink and the dashboard spinner.
+func (m Model) Init() tea.Cmd { return tea.Batch(textinput.Blink, m.spinner.Tick) }
+
+// viewForm renders the configuration screen.
+func (m Model) viewForm() string {
+	w := m.frameWidth()
+	content := innerWidth(w)
+
+	lines := make([]string, 0, len(m.inputs)+2)
+	for i := range m.inputs {
+		in := m.inputs[i]
+		in.Width = content - 27
+		if in.Width < 10 {
+			in.Width = 10
+		}
+		cursor := "  "
+		if i == m.focus {
+			cursor = accentStyle.Render("▸ ")
+		}
+		lines = append(lines, cursor+labelStyle.Render(fmt.Sprintf("%-24s", formLabels[i]))+in.View())
+	}
+	if m.formErr != "" {
+		lines = append(lines, "", errStyle.Render("✖ "+m.formErr))
+	}
+
+	subs := fmt.Sprintf("%d subscription URL(s) preloaded", len(m.subs))
+	if len(m.subs) == 0 {
+		subs = "no subscription URL preloaded"
+	}
+
+	return strings.Join([]string{
+		m.header(w, accentStyle.Render("● SETUP"), "configure a new test run"),
+		box("Sources", w, 0, dimStyle.Render(clip(m.sourceLine(), content)), hintStyle.Render(clip(subs, content))),
+		box("Parameters", w, 0, lines...),
+		hintStyle.Render("Tab = next field · Enter = start run · Ctrl+C = quit"),
+	}, "\n")
+}
+
+// viewRunning renders the live mission-control screen.
+func (m Model) viewRunning() string {
+	w := m.frameWidth()
+
+	leftW, rightW, stacked := columnWidths(w)
+	left := m.statusLines(innerWidth(leftW))
+	right := m.progressLines(innerWidth(rightW))
+
+	return strings.Join([]string{
+		m.header(w, accentStyle.Render("● RUNNING"), "mission control · "+m.cfg.TargetURL),
+		joinColumns(leftW, rightW, stacked, "Status", left, "Progress", right),
+		m.metricRow(w),
+		box("Live results", w, 0, m.logLines()...),
+		hintStyle.Render("Ctrl+C / q = stop and save partial results"),
+	}, "\n")
+}
+
+// statusLines builds the left panel of the running dashboard.
+func (m Model) statusLines(contentW int) []string {
+	return []string{
+		accentStyle.Render("▌ RUNNING ") + m.spinner.View(),
+		"",
+		accentStyle.Render(fmt.Sprintf("%d / %d", m.tested, m.total)) + "  " + labelStyle.Render("CONFIGS"),
+		"",
+		kv("TARGET", m.cfg.TargetURL, contentW),
+		kv("WORKERS", fmt.Sprintf("%d", m.cfg.Workers), contentW),
+		kv("TIMEOUT", m.cfg.Timeout.String(), contentW),
+	}
+}
+
+// progressLines builds the right panel of the running dashboard.
+func (m Model) progressLines(contentW int) []string {
+	elapsed := m.elapsed
+	if !m.start.IsZero() {
+		elapsed = time.Since(m.start)
+	}
+	pct := 0.0
+	if m.total > 0 {
+		pct = float64(m.tested) / float64(m.total)
+	}
+	barW := contentW - 7
+	if barW < 8 {
+		barW = 8
+	}
+	return []string{
+		progressBar(pct, barW) + "  " + accentStyle.Render(fmt.Sprintf("%3d%%", int(pct*100))),
+		"",
+		kv("SUCCESS", fmt.Sprintf("%d", m.succeeded), contentW),
+		kv("FAILED", fmt.Sprintf("%d", m.failed), contentW),
+		kv("ELAPSED", humanDuration(elapsed), contentW),
+		kv("SAVED", fmt.Sprintf("%d", len(m.links)), contentW),
+	}
+}
+
+// viewDone renders the completed-run dashboard.
+func (m Model) viewDone() string {
+	w := m.frameWidth()
+
+	leftW, rightW, stacked := columnWidths(w)
+	left := m.resultLines(innerWidth(leftW))
+	right := m.breakdownLines(innerWidth(rightW))
+
+	return strings.Join([]string{
+		m.header(w, okStyle.Render("✔ COMPLETE"), "run finished · "+m.cfg.TargetURL),
+		joinColumns(leftW, rightW, stacked, "Result", left, "Breakdown", right),
+		m.metricRow(w),
+		box("Share", w, 0, m.shareLines()...),
+		hintStyle.Render(m.footerHint()),
+	}, "\n")
+}
+
+// resultLines builds the left panel of the done dashboard.
+func (m Model) resultLines(contentW int) []string {
+	saved := "no results file (interrupted)"
+	if m.savedFile != "" {
+		saved = m.savedFile
+	} else if m.notice != "" {
+		saved = "none"
+	}
+	return []string{
+		okStyle.Render("✔ COMPLETE"),
+		"",
+		okStyle.Render(fmt.Sprintf("%d / %d", m.succeeded, m.tested)) + "  " + labelStyle.Render("HEALTHY"),
+		"",
+		kv("TARGET", m.cfg.TargetURL, contentW),
+		kv("SAVED", saved, contentW),
+	}
+}
+
+// breakdownLines builds the right panel of the done dashboard.
+func (m Model) breakdownLines(contentW int) []string {
+	frac := m.successFraction()
+	barW := contentW - 7
+	if barW < 8 {
+		barW = 8
+	}
+	return []string{
+		progressBar(frac, barW) + "  " + okStyle.Render(fmt.Sprintf("%3d%%", int(frac*100))),
+		"",
+		kv("SUCCESS", fmt.Sprintf("%d", m.succeeded), contentW),
+		kv("FAILED", fmt.Sprintf("%d", m.failed), contentW),
+		kv("ELAPSED", humanDuration(m.elapsed), contentW),
+		kv("LINKS", fmt.Sprintf("%d", len(m.links)), contentW),
+	}
+}
+
+// metricRow renders the four stat cards shown on the running and done screens.
+func (m Model) metricRow(w int) string {
+	elapsed := m.elapsed
+	if m.screen == ScreenRunning && !m.start.IsZero() {
+		elapsed = time.Since(m.start)
+	}
+	cards := [4]struct {
+		label string
+		value string
+		style lipgloss.Style
+	}{
+		{"Elapsed", humanDuration(elapsed), accentStyle},
+		{"Workers", fmt.Sprintf("%d", m.cfg.Workers), accentStyle},
+		{"Success", fmt.Sprintf("%d", m.succeeded), okStyle},
+		{"Failed", fmt.Sprintf("%d", m.failed), errStyle},
+	}
+
+	if w < twoColumnMin {
+		cw := (w - 1) / 2
+		row1 := lipgloss.JoinHorizontal(lipgloss.Top,
+			metricCard(cards[0].label, cards[0].value, cw, cards[0].style), " ",
+			metricCard(cards[1].label, cards[1].value, cw, cards[1].style))
+		row2 := lipgloss.JoinHorizontal(lipgloss.Top,
+			metricCard(cards[2].label, cards[2].value, cw, cards[2].style), " ",
+			metricCard(cards[3].label, cards[3].value, cw, cards[3].style))
+		return lipgloss.JoinVertical(lipgloss.Left, row1, row2)
+	}
+	cw := (w - 3) / 4
+	return lipgloss.JoinHorizontal(lipgloss.Top,
+		metricCard(cards[0].label, cards[0].value, cw, cards[0].style), " ",
+		metricCard(cards[1].label, cards[1].value, cw, cards[1].style), " ",
+		metricCard(cards[2].label, cards[2].value, cw, cards[2].style), " ",
+		metricCard(cards[3].label, cards[3].value, cw, cards[3].style))
+}
+
+// logLines returns the live result rows, or a placeholder before the first one.
+func (m Model) logLines() []string {
+	if len(m.recent) == 0 {
+		return []string{dimStyle.Render("waiting for the first healthy configuration…")}
+	}
+	out := make([]string, 0, len(m.recent))
+	out = append(out, m.recent...)
+	return out
+}
+
+// shareLines renders the done-screen paste/notice panel. The exact prompt
+// strings are preserved so the CLI and TUI stay in sync.
+func (m Model) shareLines() []string {
+	var lines []string
+	switch {
+	case m.pasteUploading:
+		lines = append(lines, accentStyle.Render("↑ Uploading to paste.rs..."))
+	case m.pastePrompt && m.pasteRetry:
+		lines = append(lines, errStyle.Render("✖ "+m.pasteErr))
+		lines = append(lines, "", warnStyle.Render(paste.RetryPrompt)+dimStyle.Render("(y = retry · any other key = give up · q = quit)"))
+	case m.pastePrompt:
+		lines = append(lines, valueStyle.Render(paste.Prompt)+dimStyle.Render("(y = upload · any other key = skip · q = quit)"))
+	case m.pasteLink != "":
+		lines = append(lines, okStyle.Render("✔ paste link: ")+valueStyle.Render(m.pasteLink))
+	default:
+		lines = append(lines, dimStyle.Render("result links stay on this machine"))
+	}
+	if m.notice != "" {
+		lines = append(lines, "", dimStyle.Render(m.notice))
+	}
+	return lines
+}
+
+// successFraction is the share of tested configs that were healthy (0..1).
+func (m Model) successFraction() float64 {
+	if m.tested <= 0 {
+		return 0
+	}
+	return float64(m.succeeded) / float64(m.tested)
+}
+
+// footerHint advertises the keys that are valid on the done screen.
+func (m Model) footerHint() string {
+	switch {
+	case m.pastePrompt && m.pasteRetry:
+		return "y = retry upload · any other key = give up · q = quit"
+	case m.pastePrompt:
+		return "y = upload · any other key = skip · q = quit"
+	default:
+		return "Enter = new run · q = quit"
+	}
+}
 
 // sourceLine tells the form where the subscription sources of the next run come
 // from, so the question answered before the UI started stays visible.
