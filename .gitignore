@@ -11,8 +11,10 @@ v2pingo.exe
 # Test / run output
 results/
 results*.md
+*.checkpoint
 *.out
 type-of-results/
+cmd/v2pingo/*.checkpoint
 
 # Fetched subscription sources
 cache/
@@ -28,3 +30,6 @@ desktop.ini
 
 # Agent
 .freebuff/
+
+# Internal design notes (not part of the public release)
+docs/superpowers/

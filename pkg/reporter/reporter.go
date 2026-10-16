@@ -182,18 +182,7 @@ func (r *Reporter) PrintSummary(duration time.Duration) {
 
 	fmt.Fprintln(out, "==================================================")
 	fmt.Fprintln(out, "TEST SUMMARY")
-	fmt.Fprintln(out, "==================================================s"[:50]) // exact separator
-	// Let's make sure exact line matches spec
-	// spec:
-	// ==================================================
-	// TEST SUMMARY
-	// ==================================================
-	// Total configs: 2500
-	// Tested:        2500
-	// Success:       180
-	// Failed:        2320
-	// Duration:      8m 12s
-	// ==================================================
+	fmt.Fprintln(out, "==================================================")
 	fmt.Fprintf(out, "Total configs: %d\n", r.totalConfigs)
 	fmt.Fprintf(out, "Tested:        %d\n", r.testedCount)
 	fmt.Fprintf(out, "Success:       %d\n", r.successCount)

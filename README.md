@@ -44,16 +44,24 @@ Built in Go for Windows (single runnable `.exe`), it tests configurations direct
 ## Installation & Build
 
 ### Prerequisites
-- [Go 1.22+](https://go.dev/dl/) installed on Windows.
+- [Go 1.27+](https://go.dev/dl/) installed (`go.mod` requires `go 1.27.0`).
+- Internet access to fetch subscription lists and to test the target URL.
+- Windows is the primary tested platform; the code is plain Go and builds on Linux/macOS as well.
 
 ### Build Executable
 ```powershell
-# Clone or navigate to the repository
-cd D:\v2-pingo
+# Clone the repository
+git clone https://github.com/<your-org>/v2pingo.git
+cd v2pingo
 
 # Build the Windows executable
 go build -o v2pingo.exe ./cmd/v2pingo
+
+# Linux / macOS alternative
+go build -o v2pingo ./cmd/v2pingo
 ```
+
+Prebuilt binaries are not committed to the repo (`*.exe` is git-ignored). Build locally with the command above.
 
 ---
 
@@ -172,6 +180,8 @@ Fetch fresh copies from GitHub and refresh the cached subscription files? [y/N]:
 | `-url` | `string` | `https://x.com` | Target test URL for end-to-end HTTP GET verification. |
 | `-c` | `int` | `20` | Concurrency level (number of worker goroutines). |
 | `-timeout` | `duration` | `15s` | Timeout for each proxy configuration test. |
+| `-batch` | `int` | `5000` | Configs parsed/tested per batch (bounds RAM; results are appended incrementally). |
+| `-tui` | `bool` | `true` | Launch interactive terminal UI when stdout is a TTY; use `-tui=false` to force plain CLI mode. |
 | `-default-subs` | `bool` | `true` | Include the subscription URLs listed in the subscription file. |
 | `-sub-file` | `string` | `sub-input.txt` | Path to the subscription list file (one URL per line). |
 | `-sub` | `string` | *(empty)* | Custom subscription URL(s) (repeatable or comma-separated). |
@@ -241,11 +251,40 @@ The shipped `sub-input.txt` contains these curated public subscriptions (edit th
 
 ---
 
+## Terminal UI (TUI)
+
+By default `v2pingo` starts an interactive Bubble Tea UI when stdout is a terminal (`-tui=true`):
+
+- The cache question is asked first in the terminal, then a form opens showing where the sources come from (`sources: cached files in cache` or `sources: fresh download from the subscription URLs`).
+- Fill in target URL, concurrency, timeout, subscriptions, then run. Live progress, summary, results-file path and optional paste upload are all shown on the done screen (`y` = upload/retry, any other key = skip/give up).
+- Force non-interactive CLI mode (CI, scripts, piping) with:
+
+```powershell
+.\v2pingo.exe -tui=false
+.\v2pingo.exe -tui=false -paste=false -cache=false -c 20
+```
+
+## Batched Runs & Resume
+
+Large subscription lists are processed in batches (`-batch`, default `5000`) to bound RAM:
+
+- Only one batch of parsed configs lives in memory at a time.
+- Each batch's healthy links are appended incrementally to `results/results_YYYYMMDD_HHMMSS.md`.
+- A sidecar checkpoint file (`results_...md.checkpoint`) records completed batches so an interrupted run (`Ctrl+C`) can resume without re-testing finished batches.
+- `cache/`, `results/` and checkpoint files are git-ignored and safe to delete at any time.
+
 ## Running Tests
 
 Run the full Go unit and integration test suite:
 ```powershell
-go test -v ./...
+go test ./...
+```
+
+Parser/subscription/reporter/paste unit tests run in a few seconds. The `cmd/v2pingo` integration tests build a temporary binary and spin up local mock servers, so give them a generous timeout on first run:
+
+```powershell
+go test -timeout 120s ./cmd/v2pingo/ -v
+go vet ./...
 ```
 
 ---
@@ -276,6 +315,27 @@ sub-input.txt (one URL per line) + custom -sub URLs
 
 ---
 
+## Privacy & Security Notes
+
+- Test only subscriptions you trust. Subscription payloads are third-party proxy lists.
+- `results/*.md` files contain working proxy share links **with credentials included**. They are git-ignored and stay local unless you explicitly answer `y` to the paste.rs upload prompt.
+- The paste link is public. Only upload when you intend to share those credentials.
+- Logs never print passwords, UUIDs or Reality keys; live output shows only `host:port`, protocol and latency.
+- Use `-paste=false` in scripts or on shared machines to guarantee nothing leaves the machine.
+
+## Contributing
+
+Issues and pull requests are welcome:
+
+1. Fork the repo and create a feature branch.
+2. Run `go vet ./...` and `go test -timeout 120s ./...` (integration tests need the longer timeout).
+3. Keep `sub-input.txt` edits minimal and explain why a source was added/removed.
+4. Do not commit `v2pingo.exe`, `cache/`, `results/`, `type-of-results/` or local subscription payloads — they are git-ignored.
+
+## Disclaimer
+
+This tool is for network measurement and debugging of proxies you are allowed to use. The shipped `sub-input.txt` points to public third-party lists of unknown provenance and availability; there is no guarantee any of them works, is stable, or is safe. Users are responsible for complying with local laws and the terms of the networks they test.
+
 ## License
 
-MIT License.
+MIT License — see [LICENSE](LICENSE).
