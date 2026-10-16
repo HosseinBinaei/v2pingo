@@ -1,154 +1,397 @@
 # v2pingo
 
-A fast, lightweight, and robust CLI tool for testing V2Ray-compatible proxy configurations extracted from subscriptions using the **sing-box core in-process**.
+**English** · [فارسی](README.fa.md)
 
-Built in Go for Windows (single runnable `.exe`), it tests configurations directly in memory without binding local TCP listening ports, measuring true round-trip HTTP latency with strict concurrency and timeout controls.
+A fast, lightweight and robust CLI tool that tests V2Ray-compatible proxy configurations
+extracted from subscriptions, using the **sing-box core in-process**.
+
+Written in Go, it tests every configuration directly in memory — without binding any local
+TCP listening port — and measures the true end-to-end HTTP round-trip latency with strict
+concurrency and timeout controls.
+
+---
+
+## Table of contents
+
+- [Features](#features)
+- [Requirements](#requirements)
+- [Installation & Build](#installation--build)
+  - [Windows](#windows)
+  - [Linux](#linux)
+  - [macOS](#macos)
+  - [Cross-compiling (build for any OS)](#cross-compiling-build-for-any-os)
+  - [Build from source (any OS)](#build-from-source-any-os)
+- [Quick Start & Usage](#quick-start--usage)
+- [How a test works (two-phase)](#how-a-test-works-two-phase)
+- [Subscription List File (`sub-input.txt`)](#subscription-list-file-sub-inputtxt)
+- [Subscription Cache (`cache/`)](#subscription-cache-cache)
+- [CLI Options](#cli-options)
+- [Choosing Workers & Timeout (Tuning)](#choosing-workers--timeout-tuning)
+- [Terminal UI (TUI)](#terminal-ui-tui)
+- [Batch Size, Batched Runs & Resume](#batch-size-batched-runs--resume)
+- [Output Examples](#output-examples)
+- [Running Tests](#running-tests)
+- [Architecture Overview](#architecture-overview)
+- [Privacy & Security Notes](#privacy--security-notes)
+- [Contributing](#contributing)
+- [Disclaimer](#disclaimer)
+- [License](#license)
 
 ---
 
 ## Features
 
-- **In-Process sing-box Core:** Direct in-memory dialer (`DialContext`) routing with zero local proxy listening ports (`127.0.0.1:XXXX`), avoiding local port exhaustion and firewall interference.
-- **Multiple Protocol Support:**
-  - **VLESS:** TCP, WebSocket, gRPC, TLS, Reality (`pbk`, `sid`, `fp`), and Vision flow (`xtls-rprx-vision`).
-  - **VMess:** Standard v2rayN JSON format, TCP, WebSocket, gRPC, and TLS.
-  - **Trojan:** TLS, WebSocket, and gRPC transports.
-  - **Shadowsocks:** Standard SIP002 (plain / base64 userinfo) and legacy base64 URI formats.
-  - **SOCKS:** `socks://` and `socks5://` links with plain, base64 and legacy fully-encoded userinfo.
-  - **Hysteria2:** `hysteria2://` and `hy2://` links with URI scheme parameters (`sni`, `insecure`, `obfs`/`obfs-password`, `pinSHA256`, `up`/`down`) and port hopping (`mport`, multi-port authority).
-  - **WireGuard:** `wireguard://` and `wg://` links (private key, `publickey`, `presharedkey`, `address`, `mtu`, `reserved`). WireGuard is tested through a sing-box **endpoint**, which is the only form sing-box still supports since the legacy outbound was removed.
-- **Flexible Subscription Handling:**
-  - Subscription URLs are read from [`sub-input.txt`](sub-input.txt) in the project root, one URL per line, so the list can be edited without rebuilding.
-  - Every source is cached in [`cache/`](#subscription-cache-cache): before a run starts you are asked whether to refresh the files from GitHub or reuse the copies downloaded earlier.
+- **In-process sing-box core:** direct in-memory dialing (`DialContext`) with **zero local
+  proxy listening ports** (`127.0.0.1:XXXX`), so there is no local port exhaustion and no
+  firewall interference.
+- **Two-phase testing:** a cheap raw **TCP precheck** eliminates dead nodes first, and only
+  reachable nodes pay the full end-to-end HTTP cost.
+- **Multiple protocol support:**
+  - **VLESS:** TCP, WebSocket, gRPC, TLS, Reality (`pbk`, `sid`, `fp`), and Vision flow
+    (`xtls-rprx-vision`).
+  - **VMess:** standard v2rayN JSON format, TCP, WebSocket, gRPC and TLS.
+  - **Trojan:** TLS, WebSocket and gRPC transports.
+  - **Shadowsocks:** standard SIP002 (plain / base64 userinfo) and legacy base64 URI formats.
+  - **SOCKS:** `socks://` and `socks5://` links with plain, base64 and legacy
+    fully-encoded userinfo.
+  - **Hysteria2:** `hysteria2://` and `hy2://` links with URI parameters (`sni`, `insecure`,
+    `obfs`/`obfs-password`, `pinSHA256`, `up`/`down`) and port hopping (`mport`, multi-port
+    authority).
+  - **WireGuard:** `wireguard://` and `wg://` links (private key, `publickey`, `presharedkey`,
+    `address`, `mtu`, `reserved`). WireGuard is tested through a sing-box **endpoint**, the
+    only form sing-box still supports since the legacy outbound was removed.
+- **Flexible subscription handling:**
+  - Subscription URLs are read from [`sub-input.txt`](sub-input.txt) in the project root, one
+    URL per line, so the list can be edited without rebuilding.
+  - Every source is cached in [`cache/`](#subscription-cache-cache); before a run starts you
+    are asked whether to refresh the files from the network or reuse the copies downloaded
+    earlier.
   - Automatically rewrites GitHub `/blob/` URLs to `raw.githubusercontent.com`.
-  - Decodes raw plain-text links, single/multiline Base64 (standard and URL-safe, padded and unpadded), and mixed subscription payloads.
-  - Normalizes and deduplicates duplicate configurations (ignoring remark `#fragments` for uniqueness).
-  - Resilient network fetching: failed subscriptions emit warnings without aborting the test batch, and a failed refresh keeps the cached copy of that source.
-- **Controlled Concurrency & Timeouts:**
+  - Decodes raw plain-text links, single/multiline Base64 (standard and URL-safe, padded and
+    unpadded) and mixed subscription payloads.
+  - Normalizes and deduplicates configurations (ignoring remark `#fragments` for uniqueness).
+  - Resilient fetching: a failed source emits a warning without aborting the run, and a failed
+    refresh keeps the cached copy of that source.
+- **Controlled concurrency & timeouts:**
   - Fixed worker pool (default: `20` concurrent workers).
-  - Strict per-test context timeouts (default: `15s`) covering handshake, connection setup, and HTTP GET request.
-  - Safe resource cleanup (`defer` for box instances, transports, idle connections, and HTTP bodies).
-- **Clean & Sanitized Output:**
-  - Real-time live status updates without leaking credentials, passwords, UUIDs, or Reality keys.
+  - Strict per-test context timeouts (default: `15s`) covering handshake, connection setup and
+    the HTTP GET request.
+  - Safe resource cleanup (`defer` for box instances, transports, idle connections and HTTP
+    bodies).
+- **Clean, sanitized output:**
+  - Real-time live status updates that never leak credentials, passwords, UUIDs or Reality keys.
   - Optional verbose mode (`-v` / `-verbose`) for inspecting failures.
-  - Graceful shutdown on `Ctrl+C` (`SIGINT` / `SIGTERM`) that halts workers safely and prints a summary for completed tests.
-- **Opt-In Shareable Results:**
-  - Once the results file is written, the tool asks whether to upload it to [paste.rs](https://paste.rs) — answering `y` / `yes` uploads it and prints the link, any other answer simply keeps the local file.
-  - The question is only asked when a results file with healthy configurations actually exists; empty runs save nothing and are never asked about.
-  - If the upload fails, the error is reported and you are asked whether to retry — `y` / `yes` tries again, any other answer gives up and leaves the saved file on disk.
-  - Skip the question entirely with `-paste=false`, or point it at another paste service with `-paste-url`.
-  - The TUI shows the same questions on its done screen (`y` uploads or retries, any other key skips or gives up).
+  - Graceful shutdown on `Ctrl+C` (`SIGINT` / `SIGTERM`) that halts workers safely and prints a
+    summary for completed tests.
+- **No elevated privileges required:** the tool only builds outbound dialers — it never creates
+  a TUN interface or touches system routing — so it runs as a normal user with no admin/root.
+- **Re-importable results:** saved entries are the original share links, so the results file can
+  be fed straight back into a v2rayN / sing-box client.
+- **Hardened fetching:** subscription downloads send a `v2rayN/6.0` User-Agent, which avoids some
+  host-based blocks.
+- **Bounded response read:** each test reads only the first ~4 KB of the response body, so the
+  reported latency reflects the handshake plus time-to-first-bytes rather than a full page
+  download.
+- **Opt-in shareable results:**
+  - Once the results file is written, the tool asks whether to upload it to
+    [paste.rs](https://paste.rs) — answering `y` / `yes` uploads it and prints the link, any
+    other answer simply keeps the local file.
+  - The question is asked only when a results file with healthy configurations actually exists;
+    empty runs save nothing and are never asked about.
+  - If the upload fails, the error is reported and you are asked whether to retry.
+  - Skip the question entirely with `-paste=false`, or point it at another paste service with
+    `-paste-url`.
+  - The TUI shows the same questions on its done screen.
+
+---
+
+## Requirements
+
+- **[Go 1.27+](https://go.dev/dl/)** installed (`go.mod` requires `go 1.27.0`).
+- Internet access to fetch subscription lists and to reach the target test URL.
+- Any of Windows, Linux or macOS. Windows is the primary tested platform, but the code is plain
+  Go and builds and runs on Linux and macOS too.
 
 ---
 
 ## Installation & Build
 
-### Prerequisites
-- [Go 1.27+](https://go.dev/dl/) installed (`go.mod` requires `go 1.27.0`).
-- Internet access to fetch subscription lists and to test the target URL.
-- Windows is the primary tested platform; the code is plain Go and builds on Linux/macOS as well.
+Prebuilt binaries are **not** committed to the repository (`*.exe` is git-ignored). Build the
+executable locally with the commands below.
 
-### Build Executable
+> Replace the clone URL with your own fork if you are working on a copy.
+
+### Windows
+
+1. Install Go from [go.dev/dl](https://go.dev/dl/) and open a new **PowerShell** window
+   (`go version` should print `go1.27` or newer).
+2. Clone and build:
+
 ```powershell
-# Clone the repository
-git clone https://github.com/<your-org>/v2pingo.git
+git clone https://github.com/HosseinBinaei/v2pingo.git
 cd v2pingo
-
-# Build the Windows executable
 go build -o v2pingo.exe ./cmd/v2pingo
+```
 
-# Linux / macOS alternative
+3. Run it:
+
+```powershell
+.\v2pingo.exe
+```
+
+> If PowerShell blocks the build or run, allow local scripts for the current session with
+> `Set-ExecutionPolicy -Scope Process Bypass`.
+
+### Linux
+
+1. Install Go (either the distro package or the official tarball):
+
+```bash
+# Debian / Ubuntu
+sudo apt update && sudo apt install -y golang-go
+
+# Fedora / RHEL
+sudo dnf install -y golang
+```
+
+If your distro ships an older Go than 1.27, install the official tarball instead:
+
+```bash
+curl -LO https://go.dev/dl/go1.27.0.linux-amd64.tar.gz   # use linux-arm64 on ARM
+sudo rm -rf /usr/local/go
+sudo tar -C /usr/local -xzf go1.27.0.linux-amd64.tar.gz
+export PATH=$PATH:/usr/local/go/bin
+```
+
+2. Clone and build:
+
+```bash
+git clone https://github.com/HosseinBinaei/v2pingo.git
+cd v2pingo
 go build -o v2pingo ./cmd/v2pingo
 ```
 
-Prebuilt binaries are not committed to the repo (`*.exe` is git-ignored). Build locally with the command above.
+3. Run it:
+
+```bash
+./v2pingo
+```
+
+### macOS
+
+1. Install Go with [Homebrew](https://brew.sh) (or the official installer from
+   [go.dev/dl](https://go.dev/dl/)):
+
+```bash
+brew install go
+```
+
+2. Clone and build:
+
+```bash
+git clone https://github.com/HosseinBinaei/v2pingo.git
+cd v2pingo
+go build -o v2pingo ./cmd/v2pingo
+```
+
+3. Run it:
+
+```bash
+./v2pingo
+```
+
+> On Apple Silicon (M-series) the build is native `arm64` automatically; Intel Macs build
+> `amd64`.
+
+### Cross-compiling (build for any OS)
+
+Go cross-compiles with no extra toolchain, so from any single machine you can produce binaries
+for every target. Set `GOOS` (operating system) and `GOARCH` (CPU architecture):
+
+| Target | `GOOS` | `GOARCH` | Output |
+|---|---|---|---|
+| Windows 64-bit | `windows` | `amd64` | `v2pingo.exe` |
+| Windows ARM64 | `windows` | `arm64` | `v2pingo.exe` |
+| Linux x86-64 | `linux` | `amd64` | `v2pingo` |
+| Linux ARM64 (Raspberry Pi / ARM server) | `linux` | `arm64` | `v2pingo` |
+| macOS Apple Silicon | `darwin` | `arm64` | `v2pingo` |
+| macOS Intel | `darwin` | `amd64` | `v2pingo` |
+
+Bash / macOS / Linux:
+
+```bash
+# Windows executable from Linux/macOS
+GOOS=windows GOARCH=amd64 go build -o v2pingo.exe ./cmd/v2pingo
+
+# Linux ARM64 (e.g. Raspberry Pi / ARM server)
+GOOS=linux GOARCH=arm64 go build -o v2pingo-arm64 ./cmd/v2pingo
+
+# macOS Apple Silicon
+GOOS=darwin GOARCH=arm64 go build -o v2pingo-darwin-arm64 ./cmd/v2pingo
+```
+
+PowerShell (Windows):
+
+```powershell
+# Linux executable from Windows
+$env:GOOS="linux"; $env:GOARCH="amd64"; go build -o v2pingo ./cmd/v2pingo
+
+# Build every desktop target at once
+$env:CGO_ENABLED="0"
+foreach ($t in @(@("windows","amd64"),@("linux","amd64"),@("linux","arm64"),@("darwin","arm64"))) {
+  $env:GOOS=$t[0]; $env:GOARCH=$t[1]
+  $ext = if ($t[0] -eq "windows") { ".exe" } else { "" }
+  go build -o "v2pingo-$($t[0])-$($t[1])$ext" ./cmd/v2pingo
+}
+```
+
+### Build from source (any OS)
+
+Use `go install` to place the binary in your `GOBIN` (`$HOME/go/bin` by default):
+
+```bash
+go install ./cmd/v2pingo
+```
 
 ---
 
 ## Quick Start & Usage
 
-### 1. Default Run
-Reads the subscription URLs listed in `sub-input.txt`, extracts all supported configurations, deduplicates them, and tests against `https://x.com` with 20 workers:
-```powershell
+Run the tool from the directory that contains `sub-input.txt`, so the subscription list and the
+`cache/` and `results/` folders are created next to it.
+
+### 1. Default run
+
+Reads the subscription URLs listed in `sub-input.txt`, extracts all supported configurations,
+deduplicates them, and tests against `https://x.com` with 20 workers:
+
+```bash
+# Linux / macOS
+./v2pingo
+
+# Windows
 .\v2pingo.exe
 ```
 
-Before anything is fetched the tool asks whether to refresh the subscription files from GitHub or reuse the copies cached in `cache/` by a previous run — see [Subscription Cache](#subscription-cache-cache).
+Before anything is fetched the tool asks whether to refresh the subscription files or reuse the
+copies cached in `cache/` — see [Subscription Cache](#subscription-cache-cache).
 
-### 2. Custom Target URL & Concurrency
+### 2. Custom target URL & concurrency
+
 Test against Google with 30 concurrent workers and a 10-second timeout:
-```powershell
-.\v2pingo.exe -url https://www.google.com/generate_204 -c 30 -timeout 10s
+
+```bash
+./v2pingo -url https://www.google.com/generate_204 -c 30 -timeout 10s
 ```
 
-### 3. Custom Subscriptions
+### 3. Custom subscriptions
+
 Disable the subscription file and test only your own subscription URLs:
-```powershell
-.\v2pingo.exe -default-subs=false -sub "https://example.com/mysub.txt"
+
+```bash
+./v2pingo -default-subs=false -sub "https://example.com/mysub.txt"
 ```
 
-You can pass multiple custom subscriptions either by repeating `-sub` or using comma-separated values:
-```powershell
-.\v2pingo.exe -sub "https://site1.com/sub.txt" -sub "https://site2.com/sub.txt"
+Pass multiple custom subscriptions either by repeating `-sub` or using comma-separated values:
+
+```bash
+./v2pingo -sub "https://site1.com/sub.txt" -sub "https://site2.com/sub.txt"
+./v2pingo -sub "https://site1.com/sub.txt,https://site2.com/sub.txt"
 ```
 
-### 4. Use Another Subscription File
+### 4. Use another subscription file
+
 Point the tool at a subscription list stored somewhere else:
-```powershell
-.\v2pingo.exe -sub-file "D:\my-subs.txt"
+
+```bash
+./v2pingo -sub-file "/path/to/my-subs.txt"
 ```
 
-### 5. Verbose Logging
+### 5. Verbose logging
+
 Show failed tests in addition to successful ones:
-```powershell
-.\v2pingo.exe -v
+
+```bash
+./v2pingo -v
 ```
 
-### 6. Publishing Results (Opt-In)
+### 6. Publishing results (opt-in)
+
 Once the results file is saved, `v2pingo` asks before publishing anything:
+
 ```text
-Saved 42 HTTP 2xx configuration(s) to results\results_20261009_183039.md
+Saved 42 HTTP 2xx configuration(s) to results/results_20261009_183039.md
 Upload the saved results to paste.rs and get a shareable link? [y/N]: y
 Paste link: https://paste.rs/AbCdE
 ```
 
-Answer `y`, `Y`, `yes`, `YES` or `Yes` to upload; **anything else** (including just pressing Enter, or running non-interactively) keeps the results local and prints `Skipped paste upload.`
+Answer `y`, `Y`, `yes`, `YES` or `Yes` to upload; **anything else** (including pressing Enter,
+or running non-interactively) keeps the results local and prints `Skipped paste upload.`
 
 If the upload itself fails, the reason is printed and the tool asks again:
+
 ```text
 Warning: failed to upload results file: ...
 Upload failed. Retry uploading to paste.rs? [y/N]: y
 Paste link: https://paste.rs/AbCdE
 ```
-Answering anything other than `y` / `yes` ends the run with the results still saved locally (`Giving up on paste upload; results remain saved locally.`).
+
+Answering anything other than `y` / `yes` ends the run with the results still saved locally
+(`Giving up on paste upload; results remain saved locally.`).
 
 Skip the question altogether, or send it to another paste service that follows the same API:
-```powershell
-.\v2pingo.exe -paste=false
-.\v2pingo.exe -paste-url "https://my-paste.example.com/"
+
+```bash
+./v2pingo -paste=false
+./v2pingo -paste-url "https://my-paste.example.com/"
 ```
 
-> The uploaded file contains working proxy share links (credentials included) and the paste link is public, so only answer yes when you intend to share them.
+> The uploaded file contains working proxy share links (credentials included) and the paste
+> link is public, so only answer yes when you intend to share them.
+
+---
+
+## How a test works (two-phase)
+
+Each configuration is tested in two phases to avoid paying the full sing-box setup cost for
+every dead node:
+
+1. **Phase 1 — TCP precheck.** A cheap raw TCP dial to the proxy's own `host:port` (capped at
+   2 seconds, or the test timeout, whichever is smaller). Nodes that cannot even accept a TCP
+   connection fail fast here, before any sing-box instance or HTTP request is created.
+   UDP-based transports (**WireGuard**, **Hysteria2**) never complete a TCP handshake and are
+   skipped straight to phase 2.
+2. **Phase 2 — end-to-end HTTP.** An ephemeral in-process sing-box `Box` is created with a
+   single outbound (or WireGuard endpoint), an `http.Client` is routed through that
+   outbound's `DialContext`, and a real `GET` request is sent to the target URL. The measured
+   latency is the true HTTP round-trip time.
+
+A configuration is only saved when it returns an HTTP **2xx** status code.
 
 ---
 
 ## Subscription List File (`sub-input.txt`)
 
-The list of subscriptions to test lives in a plain-text file in the project root. One URL per line:
+The list of subscriptions to test lives in a plain-text file in the project root. One URL per
+line:
 
 ```text
 # comments and blank lines are ignored
 https://raw.githubusercontent.com/barry-far/V2ray-Config/main/All_Configs_Sub.txt
-https://github.com/ebrasha/free-v2ray-public-list/blob/main/V2Ray-Config-By-EbraSha-All-Type.txt
+https://raw.githubusercontent.com/ebrasha/free-v2ray-public-list/blob/main/V2Ray-Config-By-EbraSha-All-Type.txt
 ```
 
-Add or remove lines to change which subscriptions are fetched — every remaining line is downloaded and tested. If the file does not exist next to the working directory, the directory of `v2pingo.exe` is checked as a fallback, and `-sub-file <path>` can point anywhere.
+Add or remove lines to change which subscriptions are fetched — every remaining line is
+downloaded and tested. If the file does not exist next to the working directory, the directory
+of the `v2pingo` executable is checked as a fallback, and `-sub-file <path>` can point anywhere.
 
 ---
 
 ## Subscription Cache (`cache/`)
 
-Every subscription source is downloaded once and stored in the `cache/` directory, one file per source URL. Nothing is fetched and no test starts before the cache question is answered, so a run either refreshes the sources from GitHub or reuses the files of an earlier run.
+Every subscription source is downloaded once and stored in the `cache/` directory, one file per
+source URL. Nothing is fetched and no test starts before the cache question is answered, so a
+run either refreshes the sources or reuses the files of an earlier run.
 
 The very first run finds no cache and downloads without asking:
 
@@ -163,13 +406,24 @@ Cached subscription files in cache: 13 file(s), newest 2026-10-15 09:12:44.
 Fetch fresh copies from GitHub and refresh the cached subscription files? [y/N]:
 ```
 
-- Answer `y` / `yes`, `Y` or `YES` to download every source again and refresh the cache with the new payloads. Cached copies of sources that are no longer listed in `sub-input.txt` are removed, so after a refresh the directory mirrors the current source list; a source that fails to download keeps its previous file for a later run.
-- **Any other answer** — `n`, Enter, or a non-interactive run without an interactive prompt — reuses the cached files and prints `Using the cached subscription files.` Sources that are still missing from the cache are downloaded once and added to it.
-- Each cache file is named after its source (`host-path-<hash>.txt`), so a source always maps to the same file and two different sources can never collide.
-- The question is skipped when `cache/` is still empty, and `-cache=false` disables the cache entirely: every run downloads fresh copies and nothing is read from or written to disk.
-- Store the cache somewhere else with `-cache-dir <path>`. A `cache` directory next to `v2pingo.exe` is also found when the tool is started from another working directory.
-- The directory only holds downloaded subscription payloads, it is ignored by Git, and you can delete it at any time to start from scratch.
-- In the TUI the question is asked before the form appears, and the form shows where the sources of the run will come from (`sources: cached files in cache` or `sources: fresh download from the subscription URLs`).
+- Answer `y` / `yes` to download every source again and refresh the cache with the new payloads.
+  Cached copies of sources that are no longer listed in `sub-input.txt` are removed, so after a
+  refresh the directory mirrors the current source list; a source that fails to download keeps
+  its previous file for a later run.
+- **Any other answer** — `n`, Enter, or a non-interactive run without an interactive prompt —
+  reuses the cached files and prints `Using the cached subscription files.` Sources that are
+  still missing from the cache are downloaded once and added to it.
+- Each cache file is named after its source (`host-path-<hash>.txt`), so a source always maps to
+  the same file and two different sources can never collide.
+- The question is skipped when `cache/` is still empty, and `-cache=false` disables the cache
+  entirely: every run downloads fresh copies and nothing is read from or written to disk.
+- Store the cache somewhere else with `-cache-dir <path>`. A `cache` directory next to the
+  executable is also found when the tool is started from another working directory.
+- The directory only holds downloaded subscription payloads, it is ignored by Git, and you can
+  delete it at any time to start from scratch.
+- In the TUI the question is asked before the form appears, and the form shows where the sources
+  of the run will come from (`sources: cached files in cache` or
+  `sources: fresh download from the subscription URLs`).
 
 ---
 
@@ -193,30 +447,119 @@ Fetch fresh copies from GitHub and refresh the cached subscription files? [y/N]:
 
 ---
 
+## Choosing Workers & Timeout (Tuning)
+
+`-c` sets how many configurations are tested at once and `-timeout` how long a single test may
+take. Bigger is not better — both values trade accuracy for speed.
+
+> **Important — do not push concurrency too high.** Although `-c` accepts up to 200 (and the
+> default is `20`), testing **more than ~10 configurations concurrently rarely improves results
+> and usually makes them worse**. Most ISPs/operators — and many home or office routers —
+> rate-limit or throttle a burst of simultaneous TLS/QUIC handshakes to many different servers,
+> so extra connections start timing out and configurations that are actually fine get recorded
+> as failures. **Keep `-c` at or below about 10 for trustworthy results.** Only raise it toward
+> the default `20` on a fast, unthrottled connection where you care more about speed than
+> precision (e.g. a second pass over the already-filtered healthy nodes).
+
+Suggested starting points by machine class:
+
+| System | Typical hardware | `-c` (workers) | `-timeout` |
+|---|---|---|---|
+| **Weak** | 1–2 cores, ≤ 4 GB RAM, older laptop or small VPS | `5` | `10s` |
+| **Medium** | 4 cores, 8 GB RAM | `8` | `12s` |
+| **Strong** | 8+ cores, 16 GB+ RAM, fast wired connection | `10` | `15s` |
+
+- Raise `-timeout` on slow links (mobile, satellite, throttled ISP) and you may lower it on a
+  fast one; a timeout that is too small produces false failures. `10s`–`15s` is a safe range.
+- The default `-c 20` / `-timeout 15s` is tuned for throughput on a strong, unthrottled
+  connection; the table above favors accuracy.
+- Dead nodes fail fast regardless of `-c`: the phase-1 TCP precheck is capped at 2 seconds, so
+  they never consume the full timeout.
+
+```bash
+# Weak machine, accuracy first
+./v2pingo -c 5 -timeout 10s
+
+# Strong machine, balanced
+./v2pingo -c 10 -timeout 15s
+```
+
+---
+
+## Terminal UI (TUI)
+
+By default `v2pingo` starts an interactive [Bubble Tea](https://github.com/charmbracelet/bubbletea)
+UI when stdout is a terminal (`-tui=true`):
+
+- The cache question is asked first in the terminal, then a form opens showing where the sources
+  come from (`sources: cached files in cache` or `sources: fresh download from the subscription URLs`).
+- Fill in target URL, concurrency (1–200), timeout, subscriptions, then run. Live progress, the
+  summary, the results-file path and the optional paste upload are all shown on the done screen
+  (`y` = upload/retry, any other key = skip/give up).
+
+Force non-interactive CLI mode (CI, scripts, piping) with:
+
+```bash
+./v2pingo -tui=false
+./v2pingo -tui=false -paste=false -cache=false -c 20
+```
+
+---
+
+## Batch Size, Batched Runs & Resume
+
+### What is a batch?
+
+A **batch** is a fixed-size slice of the extracted configurations. `v2pingo` never loads a whole
+subscription into memory at once: it parses at most one batch of configs, tests them, appends
+that batch's healthy links to the results file, records a checkpoint, frees the batch, and moves
+on. The batch size defaults to **`5000`** and is controlled by `-batch`.
+
+Change it with `-batch <N>`:
+
+```bash
+./v2pingo -batch 1000        # smaller batches, lower peak RAM
+./v2pingo -batch 50000       # larger batches, fewer writes, more RAM
+```
+
+- **Smaller batches** (`-batch 500`–`1000`): lower peak memory and more frequent incremental
+  saves, at the cost of more disk writes and checkpoint updates.
+- **Larger batches** (`-batch 20000`+): fewer saves and slightly faster overall, but a higher
+  memory ceiling — on a very large list this can reach hundreds of MB.
+- Batch size affects **RAM and save/checkpoint granularity only** — it does not change how each
+  individual test behaves or how fast a single test runs.
+- The batch size is a CLI flag; in the TUI the default (`5000`) is always used. Use `-tui=false`
+  with `-batch` when you want to change it.
+
+### How batching, resume and cleanup work
+
+- Only one batch of parsed configs lives in memory at a time.
+- Each batch's healthy links are appended incrementally to
+  `results/results_YYYYMMDD_HHMMSS.md`.
+- A sidecar checkpoint file (`results_...md.checkpoint`) records completed batches so an
+  interrupted run (`Ctrl+C`) can resume without re-testing finished batches.
+- `cache/`, `results/` and checkpoint files are git-ignored and safe to delete at any time.
+
+---
+
 ## Output Examples
 
-### Live Testing Output
+### Live testing output
+
 ```text
 [✓ SUCCESS] [#14] [vless] 104.21.58.12:443 - 182ms (HTTP 200)
 [✓ SUCCESS] [#28] [trojan] sg.proxy-node.net:443 - 245ms (HTTP 200)
 [✓ SUCCESS] [#35] [vmess] us-east.server.org:80 - 310ms (HTTP 204)
 ```
 
-*(When `-v` is enabled, failures are displayed with sanitized reasons)*:
+With `-v` enabled, failures are displayed with sanitized reasons:
+
 ```text
-[✗ FAILED] [#15] [vless] 198.51.100.2:443 - context deadline exceeded
+[✗ FAILED] [#15] [vless] 198.51.100.2:443 - precheck: context deadline exceeded
 ```
 
-### Paste Upload (Opt-In)
-```text
-Saved 42 HTTP 2xx configuration(s) to results\results_20261009_183039.md
-Upload the saved results to paste.rs and get a shareable link? [y/N]: y
-Paste link: https://paste.rs/AbCdE
-```
+### Final summary
 
-Any other answer prints `Skipped paste upload.` and nothing is sent. A failed upload is reported and followed by a retry question: `y` attempts the upload again, any other answer gives up with the results left in the local file. On the TUI's done screen the same questions are answered with a single key (`y` = upload or retry, any other key = skip or give up) and a successful link appears as a `Paste:` line.
-
-### Final Summary
 ```text
 ==================================================
 TEST SUMMARY
@@ -229,60 +572,33 @@ Duration:      3m 42s
 ==================================================
 ```
 
----
+### Paste upload (opt-in)
 
-## Default Subscription List
-
-The shipped `sub-input.txt` contains these curated public subscriptions (edit the file to add or remove entries):
-
-1. `https://raw.githubusercontent.com/barry-far/V2ray-Config/main/All_Configs_Sub.txt`
-2. `https://raw.githubusercontent.com/ebrasha/free-v2ray-public-list/refs/heads/main/V2Ray-Config-By-EbraSha.txt`
-3. `https://raw.githubusercontent.com/MatinGhanbari/v2ray-configs/main/subscriptions/v2ray/all_sub.txt`
-4. `https://raw.githubusercontent.com/0xRadikal/Free-v2ray-Configs/main/all/configs.txt`
-5. `https://raw.githubusercontent.com/Au1rxx/free-vpn-subscriptions/main/output/by-country/v2ray-base64-JP.txt`
-6. `https://raw.githubusercontent.com/Au1rxx/free-vpn-subscriptions/main/output/by-country/v2ray-base64-NL.txt`
-7. `https://raw.githubusercontent.com/Au1rxx/free-vpn-subscriptions/main/output/by-country/v2ray-base64-US.txt`
-8. `https://raw.githubusercontent.com/Au1rxx/free-vpn-subscriptions/main/output/by-country/v2ray-base64-DE.txt`
-9. `https://raw.githubusercontent.com/Alirewa/V2ray-Configs/main/config.txt`
-10. `https://raw.githubusercontent.com/morpheusadam/v2ray-config/main/subs/bundles/best.txt`
-11. `https://raw.githubusercontent.com/DukeMehdi/FreeList-V2ray-Configs/refs/heads/main/Configs/All-DukeMehdi-Configs.txt`
-12. `https://raw.githubusercontent.com/Mr-Meshky/vify/main/configs/all.txt`
-13. `https://raw.githubusercontent.com/HakurouKen/free-node/main/public`
-
----
-
-## Terminal UI (TUI)
-
-By default `v2pingo` starts an interactive Bubble Tea UI when stdout is a terminal (`-tui=true`):
-
-- The cache question is asked first in the terminal, then a form opens showing where the sources come from (`sources: cached files in cache` or `sources: fresh download from the subscription URLs`).
-- Fill in target URL, concurrency, timeout, subscriptions, then run. Live progress, summary, results-file path and optional paste upload are all shown on the done screen (`y` = upload/retry, any other key = skip/give up).
-- Force non-interactive CLI mode (CI, scripts, piping) with:
-
-```powershell
-.\v2pingo.exe -tui=false
-.\v2pingo.exe -tui=false -paste=false -cache=false -c 20
+```text
+Saved 42 HTTP 2xx configuration(s) to results/results_20261009_183039.md
+Upload the saved results to paste.rs and get a shareable link? [y/N]: y
+Paste link: https://paste.rs/AbCdE
 ```
 
-## Batched Runs & Resume
+Any other answer prints `Skipped paste upload.` and nothing is sent. A failed upload is reported
+and followed by a retry question. On the TUI's done screen the same questions are answered with
+a single key and a successful link appears as a `Paste:` line.
 
-Large subscription lists are processed in batches (`-batch`, default `5000`) to bound RAM:
-
-- Only one batch of parsed configs lives in memory at a time.
-- Each batch's healthy links are appended incrementally to `results/results_YYYYMMDD_HHMMSS.md`.
-- A sidecar checkpoint file (`results_...md.checkpoint`) records completed batches so an interrupted run (`Ctrl+C`) can resume without re-testing finished batches.
-- `cache/`, `results/` and checkpoint files are git-ignored and safe to delete at any time.
+---
 
 ## Running Tests
 
 Run the full Go unit and integration test suite:
-```powershell
+
+```bash
 go test ./...
 ```
 
-Parser/subscription/reporter/paste unit tests run in a few seconds. The `cmd/v2pingo` integration tests build a temporary binary and spin up local mock servers, so give them a generous timeout on first run:
+Parser/subscription/reporter/paste unit tests run in a few seconds. The `cmd/v2pingo`
+integration tests build a temporary binary and spin up local mock servers (including a minimal
+SOCKS5 server), so give them a generous timeout on first run:
 
-```powershell
+```bash
 go test -timeout 120s ./cmd/v2pingo/ -v
 go vet ./...
 ```
@@ -291,11 +607,11 @@ go vet ./...
 
 ## Architecture Overview
 
-```
+```text
 sub-input.txt (one URL per line) + custom -sub URLs
        │
        ▼
- [Source Cache]          ──► Reuse cache/ … or refresh it from GitHub (asked first)
+ [Source Cache]          ──► Reuse cache/ … or refresh it (asked first)
        │
        ▼
  [Fetcher & Normalizer]  ──► Plain / Base64 decode, GitHub blob rewrite
@@ -304,8 +620,9 @@ sub-input.txt (one URL per line) + custom -sub URLs
  [Parser & Deduplicator] ──► Parse VLESS / VMess / Trojan / SS / SOCKS / Hysteria2 / WireGuard
        │                     & build sing-box outbound (or endpoint) options
        ▼
- [Worker Pool (Fixed N)] ──► Ephemeral in-process Box instance (zero open listening ports)
-       │                  ──► HTTP Client over outbound/endpoint DialContext
+ [Two-Phase Worker Pool] ──► Phase 1: raw TCP precheck (fail fast, skip for UDP protocols)
+       │                  ──► Phase 2: ephemeral in-process Box + HTTP over DialContext
+       │                     (zero open listening ports)
        ▼
  [Reporter & Sanitizer]  ──► Live progress & final summary
        │
@@ -318,23 +635,36 @@ sub-input.txt (one URL per line) + custom -sub URLs
 ## Privacy & Security Notes
 
 - Test only subscriptions you trust. Subscription payloads are third-party proxy lists.
-- `results/*.md` files contain working proxy share links **with credentials included**. They are git-ignored and stay local unless you explicitly answer `y` to the paste.rs upload prompt.
+- `results/*.md` files contain working proxy share links **with credentials included**. They are
+  git-ignored and stay local unless you explicitly answer `y` to the paste.rs upload prompt.
 - The paste link is public. Only upload when you intend to share those credentials.
-- Logs never print passwords, UUIDs or Reality keys; live output shows only `host:port`, protocol and latency.
+- Logs never print passwords, UUIDs or Reality keys; live output shows only `host:port`,
+  protocol and latency.
 - Use `-paste=false` in scripts or on shared machines to guarantee nothing leaves the machine.
+
+---
 
 ## Contributing
 
 Issues and pull requests are welcome:
 
 1. Fork the repo and create a feature branch.
-2. Run `go vet ./...` and `go test -timeout 120s ./...` (integration tests need the longer timeout).
-3. Keep `sub-input.txt` edits minimal and explain why a source was added/removed.
-4. Do not commit `v2pingo.exe`, `cache/`, `results/`, `type-of-results/` or local subscription payloads — they are git-ignored.
+2. Run `go vet ./...` and `go test -timeout 120s ./...` (integration tests need the longer
+   timeout).
+3. Keep `sub-input.txt` edits minimal and explain why a source was added or removed.
+4. Do not commit `v2pingo.exe`, `cache/`, `results/`, `type-of-results/` or local subscription
+   payloads — they are git-ignored.
+
+---
 
 ## Disclaimer
 
-This tool is for network measurement and debugging of proxies you are allowed to use. The shipped `sub-input.txt` points to public third-party lists of unknown provenance and availability; there is no guarantee any of them works, is stable, or is safe. Users are responsible for complying with local laws and the terms of the networks they test.
+This tool is for network measurement and debugging of proxies you are allowed to use. The
+shipped `sub-input.txt` points to public third-party lists of unknown provenance and
+availability; there is no guarantee any of them works, is stable or is safe. Users are
+responsible for complying with local laws and the terms of the networks they test.
+
+---
 
 ## License
 
