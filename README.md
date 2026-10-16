@@ -226,9 +226,18 @@ Duration:      3m 42s
 The shipped `sub-input.txt` contains these curated public subscriptions (edit the file to add or remove entries):
 
 1. `https://raw.githubusercontent.com/barry-far/V2ray-Config/main/All_Configs_Sub.txt`
-2. `https://github.com/ebrasha/free-v2ray-public-list/blob/main/V2Ray-Config-By-EbraSha-All-Type.txt` (auto-rewritten to raw)
+2. `https://raw.githubusercontent.com/ebrasha/free-v2ray-public-list/refs/heads/main/V2Ray-Config-By-EbraSha.txt`
 3. `https://raw.githubusercontent.com/MatinGhanbari/v2ray-configs/main/subscriptions/v2ray/all_sub.txt`
 4. `https://raw.githubusercontent.com/0xRadikal/Free-v2ray-Configs/main/all/configs.txt`
+5. `https://raw.githubusercontent.com/Au1rxx/free-vpn-subscriptions/main/output/by-country/v2ray-base64-JP.txt`
+6. `https://raw.githubusercontent.com/Au1rxx/free-vpn-subscriptions/main/output/by-country/v2ray-base64-NL.txt`
+7. `https://raw.githubusercontent.com/Au1rxx/free-vpn-subscriptions/main/output/by-country/v2ray-base64-US.txt`
+8. `https://raw.githubusercontent.com/Au1rxx/free-vpn-subscriptions/main/output/by-country/v2ray-base64-DE.txt`
+9. `https://raw.githubusercontent.com/Alirewa/V2ray-Configs/main/config.txt`
+10. `https://raw.githubusercontent.com/morpheusadam/v2ray-config/main/subs/bundles/best.txt`
+11. `https://raw.githubusercontent.com/DukeMehdi/FreeList-V2ray-Configs/refs/heads/main/Configs/All-DukeMehdi-Configs.txt`
+12. `https://raw.githubusercontent.com/Mr-Meshky/vify/main/configs/all.txt`
+13. `https://raw.githubusercontent.com/HakurouKen/free-node/main/public`
 
 ---
 
