@@ -461,28 +461,13 @@ take. Bigger is not better — both values trade accuracy for speed.
 > the default `20` on a fast, unthrottled connection where you care more about speed than
 > precision (e.g. a second pass over the already-filtered healthy nodes).
 
-Suggested starting points by machine class:
-
-| System | Typical hardware | `-c` (workers) | `-timeout` |
-|---|---|---|---|
-| **Weak** | 1–2 cores, ≤ 4 GB RAM, older laptop or small VPS | `5` | `10s` |
-| **Medium** | 4 cores, 8 GB RAM | `8` | `12s` |
-| **Strong** | 8+ cores, 16 GB+ RAM, fast wired connection | `10` | `15s` |
-
-- Raise `-timeout` on slow links (mobile, satellite, throttled ISP) and you may lower it on a
-  fast one; a timeout that is too small produces false failures. `10s`–`15s` is a safe range.
-- The default `-c 20` / `-timeout 15s` is tuned for throughput on a strong, unthrottled
-  connection; the table above favors accuracy.
-- Dead nodes fail fast regardless of `-c`: the phase-1 TCP precheck is capped at 2 seconds, so
-  they never consume the full timeout.
-
-```bash
-# Weak machine, accuracy first
-./v2pingo -c 5 -timeout 10s
-
-# Strong machine, balanced
-./v2pingo -c 10 -timeout 15s
-```
+> **Tune for your own operator & system.** The best worker count and timeout are not the same
+> on every network — your operator's throttling behavior, your machine's CPU/RAM, and your
+> local network conditions all matter. **Test on your own setup before relying on the numbers
+> below:** start from a conservative value (e.g. `-c 5`), run a small batch, and raise `-c`
+> gradually while watching whether successes drop or false failures increase. Too many workers
+> can sometimes produce *worse* results (more timeouts, more false failures), so the best value
+> for you is the highest concurrency that still yields stable, accurate results.
 
 ---
 
