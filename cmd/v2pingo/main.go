@@ -168,15 +168,14 @@ func resolveFetchMode(reader *bufio.Reader, cacheDir string) subscription.FetchM
 
 	stats := subscription.InspectCache(cacheDir)
 	if stats.Files == 0 {
-		fmt.Printf("No cached subscription files in %s; fetching fresh copies from the source links.\n", cacheDir)
+		fmt.Println("No cached subscriptions; downloading fresh copies.")
 		return subscription.FetchNetwork
 	}
 
-	fmt.Printf("Cached subscription files in %s: %d file(s), newest %s.\n", stats.Dir, stats.Files, stats.Updated.Format("2006-01-02 15:04:05"))
+	fmt.Printf("Cache: %d file(s), newest %s.\n", stats.Files, stats.Updated.Format("2006-01-02 15:04:05"))
 	if askYesNo(reader, subscription.CachePrompt) {
 		return subscription.FetchNetwork
 	}
-	fmt.Println("Using the cached subscription files.")
 	return subscription.FetchCache
 }
 

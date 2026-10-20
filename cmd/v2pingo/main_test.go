@@ -586,7 +586,7 @@ func TestCLIIntegrationSubscriptionCache(t *testing.T) {
 
 	// First run: nothing is cached yet, so the source is downloaded and stored.
 	out := run("")
-	if !strings.Contains(out, "No cached subscription files") {
+	if !strings.Contains(out, "No cached subscriptions") {
 		t.Fatalf("expected the first run to report an empty cache, got:\n%s", out)
 	}
 	if !strings.Contains(cachedBody(), "CachedOne") {
@@ -606,7 +606,7 @@ func TestCLIIntegrationSubscriptionCache(t *testing.T) {
 	if !strings.Contains(out, subscription.CachePrompt) {
 		t.Fatalf("expected the cache question when a cache exists, got:\n%s", out)
 	}
-	if !strings.Contains(out, "Using the cached subscription files.") {
+	if !strings.Contains(out, "Cache: 1 file(s)") {
 		t.Fatalf("expected the cached files to be announced, got:\n%s", out)
 	}
 	if got := hitsNow(); got != firstHits {

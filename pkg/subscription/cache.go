@@ -44,7 +44,7 @@ const (
 // y / yes downloads fresh copies from the source links and refreshes the cache;
 // every other answer — including Enter and a non-interactive EOF — reuses the
 // cached files.
-const CachePrompt = "Fetch fresh copies from GitHub and refresh the cached subscription files? [y/N]: "
+const CachePrompt = "Refresh subscriptions from GitHub? [y/N]: "
 
 // CacheStats describes what a cache directory currently holds.
 type CacheStats struct {

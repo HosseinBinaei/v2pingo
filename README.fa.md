@@ -393,22 +393,21 @@ https://raw.githubusercontent.com/ebrasha/free-v2ray-public-list/blob/main/V2Ray
 اولین اجرا کشی پیدا نمی‌کند و بدون پرسش دانلود می‌کند:
 
 ```text
-No cached subscription files in cache; fetching fresh copies from the source links.
+No cached subscriptions; downloading fresh copies.
 ```
 
 هر اجرای بعدی آنچه موجود است را نشان می‌دهد و می‌پرسد:
 
 ```text
-Cached subscription files in cache: 13 file(s), newest 2026-10-15 09:12:44.
-Fetch fresh copies from GitHub and refresh the cached subscription files? [y/N]:
+Cache: 13 file(s), newest 2026-10-15 09:12:44.
+Refresh subscriptions from GitHub? [y/N]:
 ```
 
 - پاسخ `y` / `yes`: همهٔ منابع دوباره دانلود و کش با محتوای جدید به‌روزرسانی می‌شود. نسخه‌های
   کش‌شدهٔ منابعی که دیگر در `sub-input.txt` نیستند حذف می‌شوند، پس بعد از به‌روزرسانی پوشه آینهٔ
   لیست فعلی منابع می‌شود؛ منبعی که دانلودش شکست بخورد فایل قبلی‌اش برای اجرای بعدی حفظ می‌شود.
 - **هر پاسخ دیگر** — یعنی `n`، Enter، یا اجرای غیرتعاملی بدون پرسش — فایل‌های کش را استفاده
-  می‌کند و پیام `Using the cached subscription files.` چاپ می‌شود. منابعی که هنوز در کش نیستند،
-  یک بار دانلود و به آن اضافه می‌شوند.
+  می‌کند. منابعی که هنوز در کش نیستند، یک بار دانلود و به آن اضافه می‌شوند.
 - نام هر فایل کش برگرفته از منبع آن است (`host-path-<hash>.txt`)؛ پس هر منبع همیشه به یک فایل
   نگاشت می‌شود و دو منبع متفاوت هرگز تداخل نمی‌کنند.
 - وقتی `cache/` خالی است این پرسش رد می‌شود، و `-cache=false` کش را کامل غیرفعال می‌کند: هر اجرا

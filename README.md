@@ -396,14 +396,14 @@ run either refreshes the sources or reuses the files of an earlier run.
 The very first run finds no cache and downloads without asking:
 
 ```text
-No cached subscription files in cache; fetching fresh copies from the source links.
+No cached subscriptions; downloading fresh copies.
 ```
 
 Every later run shows what is available and asks:
 
 ```text
-Cached subscription files in cache: 13 file(s), newest 2026-10-15 09:12:44.
-Fetch fresh copies from GitHub and refresh the cached subscription files? [y/N]:
+Cache: 13 file(s), newest 2026-10-15 09:12:44.
+Refresh subscriptions from GitHub? [y/N]:
 ```
 
 - Answer `y` / `yes` to download every source again and refresh the cache with the new payloads.
@@ -411,8 +411,8 @@ Fetch fresh copies from GitHub and refresh the cached subscription files? [y/N]:
   refresh the directory mirrors the current source list; a source that fails to download keeps
   its previous file for a later run.
 - **Any other answer** — `n`, Enter, or a non-interactive run without an interactive prompt —
-  reuses the cached files and prints `Using the cached subscription files.` Sources that are
-  still missing from the cache are downloaded once and added to it.
+  reuses the cached files. Sources that are still missing from the cache are downloaded once
+  and added to it.
 - Each cache file is named after its source (`host-path-<hash>.txt`), so a source always maps to
   the same file and two different sources can never collide.
 - The question is skipped when `cache/` is still empty, and `-cache=false` disables the cache
