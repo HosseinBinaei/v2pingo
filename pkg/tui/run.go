@@ -2,6 +2,8 @@ package tui
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -71,7 +73,12 @@ func startBackgroundRun(prog *tea.Program, cfg FormConfig, opts Options) {
 		boundCancel = cancel
 		client := &http.Client{Timeout: 30 * time.Second}
 		fctx, fcancel := context.WithTimeout(ctx, 60*time.Second)
-		rawLinks := subscription.FetchSubscriptions(fctx, cfg.Subs, client, opts.CacheDir, opts.FetchMode)
+		// Fetch warnings must never reach the console directly: while the
+		// dashboard is on screen a stray write corrupts the rendered frame, so
+		// they are forwarded into the BubbleTea loop and shown by the UI itself.
+		rawLinks := subscription.FetchSubscriptionsWithWarn(fctx, cfg.Subs, client, opts.CacheDir, opts.FetchMode, func(format string, args ...any) {
+			prog.Send(NoticeMsg{Text: fmt.Sprintf(format, args...)})
+		})
 		fcancel()
 		resultsFile := runner.DefaultResultsFile()
 		checkpointFile := resultsFile + ".checkpoint"
@@ -83,7 +90,7 @@ func startBackgroundRun(prog *tea.Program, cfg FormConfig, opts Options) {
 		}
 		// Batched run: at most one 5k batch of configs in RAM; healthy links
 		// are appended to resultsFile after each batch with resume support.
-		_ = runner.RunBatches(ctx, rawLinks, runner.BatchConfig{
+		runErr := runner.RunBatches(ctx, rawLinks, runner.BatchConfig{
 			TargetURL:      cfg.TargetURL,
 			Concurrency:    cfg.Workers,
 			Timeout:        cfg.Timeout,
@@ -94,8 +101,14 @@ func startBackgroundRun(prog *tea.Program, cfg FormConfig, opts Options) {
 			col.OnResult(res)
 			prog.Send(ResultMsg{Res: res})
 		})
+		// A cancelled run ends with the user's partial DoneMsg; any other batch
+		// error is surfaced on the done screen instead of being dropped.
+		notice := ""
+		if runErr != nil && !errors.Is(runErr, context.Canceled) {
+			notice = "run stopped: " + runErr.Error()
+		}
 		tested, okCount, failCount, links := col.Snapshot()
-		prog.Send(DoneMsg{Tested: tested, Success: okCount, Failed: failCount, Links: links, SavedFile: resultsFile, Elapsed: time.Since(start)})
+		prog.Send(DoneMsg{Tested: tested, Success: okCount, Failed: failCount, Links: links, SavedFile: resultsFile, Elapsed: time.Since(start), Notice: notice})
 	}()
 }
 

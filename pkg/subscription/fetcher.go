@@ -174,7 +174,19 @@ func DecodePayload(content []byte) []string {
 
 // FetchSubscriptions fetches multiple subscription URLs sequentially and
 // extracts their proxy share links. Sources that fail are reported as warnings
-// without aborting the run.
+// on the standard logger without aborting the run.
+func FetchSubscriptions(ctx context.Context, urls []string, client *http.Client, dir string, mode FetchMode) []string {
+	return FetchSubscriptionsWithWarn(ctx, urls, client, dir, mode, func(format string, args ...any) {
+		log.Printf("warn: "+format, args...)
+	})
+}
+
+// FetchSubscriptionsWithWarn behaves like FetchSubscriptions but reports every
+// non-fatal problem to warn instead of the standard logger. A caller that owns
+// the terminal — a full-screen UI such as the TUI — passes a callback so the
+// warning is shown inside its own display: a write straight to the console
+// while a UI framework is repainting corrupts the rendered screen. A nil warn
+// discards the warnings; warn must be safe to call from any goroutine.
 //
 // dir is the directory that keeps a copy of every downloaded payload so a later
 // run can reuse it: with FetchCache the cached payloads are used and only
@@ -182,7 +194,10 @@ func DecodePayload(content []byte) []string {
 // source is downloaded and stale cache entries are pruned so the directory
 // mirrors the current source list. An empty dir disables caching entirely —
 // nothing is read from or written to disk.
-func FetchSubscriptions(ctx context.Context, urls []string, client *http.Client, dir string, mode FetchMode) []string {
+func FetchSubscriptionsWithWarn(ctx context.Context, urls []string, client *http.Client, dir string, mode FetchMode, warn func(format string, args ...any)) []string {
+	if warn == nil {
+		warn = func(format string, args ...any) {}
+	}
 	if client == nil {
 		client = &http.Client{
 			Timeout: 30 * time.Second,
@@ -210,18 +225,18 @@ func FetchSubscriptions(ctx context.Context, urls []string, client *http.Client,
 					allLinks = append(allLinks, DecodePayload(payload)...)
 					continue
 				}
-				log.Printf("warn: %s is missing from the cache, downloading it", normURL)
+				warn("%s is missing from the cache, downloading it", normURL)
 			}
 		}
 
 		body, err := fetchPayload(ctx, client, normURL)
 		if err != nil {
-			log.Printf("warn: %v", err)
+			warn("%v", err)
 			continue
 		}
 		if dir != "" {
 			if err := writeCachedSubscription(dir, normURL, body); err != nil {
-				log.Printf("warn: %v", err)
+				warn("%v", err)
 			}
 		}
 		allLinks = append(allLinks, DecodePayload(body)...)
@@ -229,7 +244,7 @@ func FetchSubscriptions(ctx context.Context, urls []string, client *http.Client,
 
 	if dir != "" && mode == FetchNetwork {
 		if err := pruneCache(dir, keep); err != nil {
-			log.Printf("warn: %v", err)
+			warn("%v", err)
 		}
 	}
 

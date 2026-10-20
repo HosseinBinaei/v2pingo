@@ -50,6 +50,13 @@ type DoneMsg struct {
 // "Testing x/total" while results stream in.
 type TotalMsg struct{ Total int }
 
+// NoticeMsg carries a non-fatal problem from the background run — a
+// subscription source that failed to download, a cache file that could not be
+// written — onto the running screen. The background goroutine must never print
+// such messages itself: a console write behind the UI's back corrupts the
+// rendered frame.
+type NoticeMsg struct{ Text string }
+
 // StartTestsMsg triggers the background fetch+test goroutine.
 type StartTestsMsg struct{ Cfg FormConfig }
 
@@ -75,6 +82,7 @@ type Model struct {
 	pasteUploading bool
 	elapsed        time.Duration
 	notice         string
+	warning        string
 	opts           Options
 	start          time.Time
 	spinner        spinner.Model
@@ -151,6 +159,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.cfg = cfg
 				m.screen = ScreenRunning
 				m.start = time.Now()
+				m.warning = "" // a fresh run starts with a clean warning line
 				return m, func() tea.Msg { return StartTestsMsg{Cfg: cfg} }
 			}
 			if m.screen == ScreenDone {
@@ -177,6 +186,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case TotalMsg:
 		m.total = msg.Total
+		return m, nil
+	case NoticeMsg:
+		m.warning = msg.Text
 		return m, nil
 	case ResultMsg:
 		m.tested++
@@ -340,13 +352,17 @@ func (m Model) viewRunning() string {
 	left := m.statusLines(innerWidth(leftW))
 	right := m.progressLines(innerWidth(rightW))
 
-	return strings.Join([]string{
+	lines := []string{
 		m.header(w, accentStyle.Render("● RUNNING"), "mission control · "+m.cfg.TargetURL),
 		joinColumns(leftW, rightW, stacked, "Status", left, "Progress", right),
 		m.metricRow(w),
 		box("Live results", w, 0, m.logLines()...),
-		hintStyle.Render("Ctrl+C / q = stop and save partial results"),
-	}, "\n")
+	}
+	if m.warning != "" {
+		lines = append(lines, warnStyle.Render("⚠ "+clip(m.warning, innerWidth(w)-2)))
+	}
+	lines = append(lines, hintStyle.Render("Ctrl+C / q = stop and save partial results"))
+	return strings.Join(lines, "\n")
 }
 
 // statusLines builds the left panel of the running dashboard.

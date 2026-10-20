@@ -1,8 +1,11 @@
 package subscription
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
+	"fmt"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -340,4 +343,53 @@ func TestFetchSubscriptions(t *testing.T) {
 			t.Errorf("expected 0 links on canceled context, got %d", len(links))
 		}
 	})
+}
+
+func TestFetchSubscriptionsWithWarnRoutesWarningsToCallback(t *testing.T) {
+	tsOK := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("vless://user1@1.1.1.1:443#Server1\n"))
+	}))
+	defer tsOK.Close()
+
+	ts404 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		w.Write([]byte("Not Found"))
+	}))
+	defer ts404.Close()
+
+	var warnings []string
+	links := FetchSubscriptionsWithWarn(context.Background(), []string{tsOK.URL, ts404.URL}, nil, "", FetchNetwork, func(format string, args ...any) {
+		warnings = append(warnings, fmt.Sprintf(format, args...))
+	})
+	if len(links) != 1 {
+		t.Fatalf("expected 1 link from the healthy source, got %v", links)
+	}
+	if len(warnings) != 1 || !strings.Contains(warnings[0], ts404.URL) {
+		t.Fatalf("expected exactly the failing source to reach the callback, got %v", warnings)
+	}
+
+	// A nil sink must not panic and must still return the healthy links.
+	if links := FetchSubscriptionsWithWarn(context.Background(), []string{tsOK.URL, ts404.URL}, nil, "", FetchNetwork, nil); len(links) != 1 {
+		t.Fatalf("expected the nil warn sink to keep working, got links %v", links)
+	}
+}
+
+// TestFetchSubscriptionsKeepsWarnPrefixInLog pins the CLI behavior: the
+// standard-logger variant prefixes every warning with "warn:".
+func TestFetchSubscriptionsKeepsWarnPrefixInLog(t *testing.T) {
+	ts404 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		w.Write([]byte("Not Found"))
+	}))
+	defer ts404.Close()
+
+	var buf bytes.Buffer
+	log.SetOutput(&buf)
+	defer log.SetOutput(os.Stderr)
+
+	FetchSubscriptions(context.Background(), []string{ts404.URL}, nil, "", FetchNetwork)
+	if out := buf.String(); !strings.Contains(out, "warn: ") || !strings.Contains(out, ts404.URL) {
+		t.Fatalf("expected a 'warn:' line naming the source in the log, got %q", out)
+	}
 }

@@ -77,6 +77,41 @@ func TestModel_TotalMsgSetsTotalAndSurvivesResults(t *testing.T) {
 	}
 }
 
+func TestModel_NoticeMsgShowsWarningOnRunningScreen(t *testing.T) {
+	m := NewModel([]string{"https://a.com/s"}, "https://x.com", 20, 15*time.Second)
+	m.screen = ScreenRunning
+	m.cfg = FormConfig{Subs: []string{"https://a.com/s"}, TargetURL: "https://x.com", Workers: 20, Timeout: 15 * time.Second}
+	warning := "failed to fetch subscription https://a.com/s: boom"
+	next, _ := m.Update(NoticeMsg{Text: warning})
+	got := next.(Model)
+	if got.warning != warning {
+		t.Fatalf("expected NoticeMsg to store the warning, got %q", got.warning)
+	}
+	view := got.View()
+	if !strings.Contains(view, "boom") {
+		t.Fatalf("expected the warning line in the running view, got %q", view)
+	}
+}
+
+func TestModel_NewRunClearsStaleWarning(t *testing.T) {
+	m := NewModel([]string{"https://a.com/s"}, "https://x.com", 20, 15*time.Second)
+	m.screen = ScreenRunning
+	warned, _ := m.Update(NoticeMsg{Text: "stale warning"})
+	if got := warned.(Model); got.warning == "" {
+		t.Fatal("expected the warning to be stored first")
+	}
+	done, _ := warned.(Model).Update(DoneMsg{Tested: 1, Success: 1})
+	backToForm, _ := done.(Model).Update(tea.KeyMsg{Type: tea.KeyEnter})
+	running, _ := backToForm.(Model).Update(tea.KeyMsg{Type: tea.KeyEnter})
+	got := running.(Model)
+	if got.screen != ScreenRunning {
+		t.Fatalf("expected the second Enter to start a run, got screen %v", got.screen)
+	}
+	if got.warning != "" {
+		t.Fatalf("a new run must start with a clean warning line, got %q", got.warning)
+	}
+}
+
 func TestModel_QCancelsRunWithoutQuitting(t *testing.T) {
 	cancelled := false
 	boundCancel = func() { cancelled = true }
