@@ -2,6 +2,7 @@ package parser
 
 import (
 	"fmt"
+	"net"
 	"net/url"
 	"strconv"
 	"strings"
@@ -78,9 +79,28 @@ func ParseAndConvert(rawLink string, index int) (*types.ProxyConfig, error) {
 		return parseHysteria2(trimmed, index)
 	case strings.HasPrefix(lower, "wireguard://"), strings.HasPrefix(lower, "wg://"):
 		return parseWireGuard(trimmed, index)
+	case IsBareAddress(trimmed):
+		return parseBareSOCKS(trimmed, index)
 	default:
 		return nil, fmt.Errorf("unsupported protocol scheme in link: %s", rawLink)
 	}
+}
+
+// IsBareAddress reports whether s is exactly a bare "ip:port" address — an
+// IPv4 dotted quad or a bracketed IPv6 literal followed by a valid non-zero
+// port — with no scheme, userinfo, path or remark. A subscription entry in
+// this shape carries no protocol information, so it is treated as an
+// unauthenticated SOCKS5 proxy.
+func IsBareAddress(s string) bool {
+	host, portText, err := net.SplitHostPort(s)
+	if err != nil {
+		return false
+	}
+	port, err := strconv.ParseUint(portText, 10, 16)
+	if err != nil || port == 0 {
+		return false
+	}
+	return net.ParseIP(host) != nil
 }
 
 // DeduplicateConfigs parses raw links, removes duplicates based on their stripped URI,

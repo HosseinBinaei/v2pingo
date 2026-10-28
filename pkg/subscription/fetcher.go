@@ -15,6 +15,8 @@ import (
 	"strings"
 	"time"
 	"unicode"
+
+	"v2pingo/pkg/parser"
 )
 
 // DefaultSubscriptionFile is the project-root file that lists the subscription
@@ -279,9 +281,12 @@ func fetchPayload(ctx context.Context, client *http.Client, normURL string) ([]b
 	return body, nil
 }
 
+// isProxyLink reports whether a subscription line is an entry v2pingo can
+// test: either a supported scheme-prefixed share link, or a bare "ip:port"
+// address, which the parser treats as an unauthenticated SOCKS5 proxy.
 func isProxyLink(s string) bool {
 	lower := strings.ToLower(s)
-	return strings.HasPrefix(lower, "vless://") ||
+	if strings.HasPrefix(lower, "vless://") ||
 		strings.HasPrefix(lower, "vmess://") ||
 		strings.HasPrefix(lower, "trojan://") ||
 		strings.HasPrefix(lower, "ss://") ||
@@ -290,7 +295,10 @@ func isProxyLink(s string) bool {
 		strings.HasPrefix(lower, "hysteria2://") ||
 		strings.HasPrefix(lower, "hy2://") ||
 		strings.HasPrefix(lower, "wireguard://") ||
-		strings.HasPrefix(lower, "wg://")
+		strings.HasPrefix(lower, "wg://") {
+		return true
+	}
+	return parser.IsBareAddress(s)
 }
 
 func stripWhitespace(b []byte) []byte {

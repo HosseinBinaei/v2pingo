@@ -53,7 +53,9 @@ concurrency and timeout controls.
   - **Trojan:** TLS, WebSocket and gRPC transports.
   - **Shadowsocks:** standard SIP002 (plain / base64 userinfo) and legacy base64 URI formats.
   - **SOCKS:** `socks://` and `socks5://` links with plain, base64 and legacy
-    fully-encoded userinfo.
+    fully-encoded userinfo. Bare `ip:port` entries (no scheme, IPv4 or bracketed
+    IPv6) carry no protocol information and are treated as unauthenticated
+    SOCKS5 proxies.
   - **Hysteria2:** `hysteria2://` and `hy2://` links with URI parameters (`sni`, `insecure`,
     `obfs`/`obfs-password`, `pinSHA256`, `up`/`down`) and port hopping (`mport`, multi-port
     authority).

@@ -15,3 +15,16 @@ https://raw.githubusercontent.com/morpheusadam/v2ray-config/main/subs/bundles/be
 https://raw.githubusercontent.com/DukeMehdi/FreeList-V2ray-Configs/refs/heads/main/Configs/All-DukeMehdi-Configs.txt
 https://raw.githubusercontent.com/Mr-Meshky/vify/main/configs/all.txt
 https://raw.githubusercontent.com/HakurouKen/free-node/main/public
+https://raw.githubusercontent.com/proxmint/free-proxy-list/refs/heads/main/proxies/all.txt
+https://raw.githubusercontent.com/fyvri/fresh-proxy-list/archive/storage/classic/all.txt
+https://raw.githubusercontent.com/monosans/proxy-list/refs/heads/main/proxies/all.txt
+https://raw.githubusercontent.com/TheSpeedX/PROXY-List/refs/heads/master/socks5.txt
+https://cdn.jsdelivr.net/gh/proxifly/free-proxy-list@main/proxies/all/data.txt
+https://raw.githubusercontent.com/iplocate/free-proxy-list/refs/heads/main/all-proxies.txt
+https://raw.githubusercontent.com/proxio-io/proxy-list/main/all.txt
+https://raw.githubusercontent.com/databay-labs/free-proxy-list/master/http.txt
+https://raw.githubusercontent.com/databay-labs/free-proxy-list/master/socks5.txt
+https://raw.githubusercontent.com/r00tee/Proxy-List/main/Https.txt
+https://raw.githubusercontent.com/r00tee/Proxy-List/main/Socks5.txt
+https://raw.githubusercontent.com/VPSLabCloud/VPSLab-Free-Proxy-List/main/http_all.txt
+https://raw.githubusercontent.com/VPSLabCloud/VPSLab-Free-Proxy-List/main/socks5_all.txt

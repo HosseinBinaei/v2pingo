@@ -39,8 +39,10 @@ type PasteDoneMsg struct {
 
 // bound is the running program, set by Run before prog.Run() so Update can
 // start the background test goroutine when StartTestsMsg arrives.
-// boundCancel stops the in-flight run (set by startBackgroundRun); the 'q'
-// key in Update calls it so the goroutine below can send a partial DoneMsg.
+// boundCancel stops the in-flight run (set synchronously by
+// startBackgroundRun); the 'q' key and Ctrl+C in Update call it so the
+// goroutine winds down and sends the single final DoneMsg, which moves the
+// UI to the done screen and decides the paste question.
 var bound *tea.Program
 
 var boundCancel context.CancelFunc
@@ -65,12 +67,17 @@ func Run(subs []string, target string, workers int, timeout time.Duration, opts 
 // and forwards every result with prog.Send (goroutine-safe in BubbleTea). The
 // subscription sources come from the cache directory or from GitHub according
 // to opts.FetchMode, which the caller resolved before the UI started.
+//
+// The run context is created here — synchronously on the UI goroutine — so
+// boundCancel is stored before this function returns; a q pressed right after
+// Enter can then always reach the cancel func, and storing it from the
+// goroutine would be a data race with the Update loop that reads it.
 func startBackgroundRun(prog *tea.Program, cfg FormConfig, opts Options) {
+	ctx, cancel := context.WithCancel(context.Background())
+	boundCancel = cancel
 	go func() {
 		start := time.Now()
-		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		boundCancel = cancel
 		client := &http.Client{Timeout: 30 * time.Second}
 		fctx, fcancel := context.WithTimeout(ctx, 60*time.Second)
 		// Fetch warnings must never reach the console directly: while the

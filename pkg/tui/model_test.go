@@ -121,25 +121,25 @@ func TestModel_QCancelsRunWithoutQuitting(t *testing.T) {
 	m.screen = ScreenRunning
 	m.tested, m.succeeded, m.failed = 3, 2, 1
 	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
-	if got := next.(Model); got.screen != ScreenRunning {
-		t.Fatalf("q must leave the model on ScreenRunning (DoneMsg arrives via cmd), got %+v", got.screen)
+	got := next.(Model)
+	if got.screen != ScreenRunning {
+		t.Fatalf("q must keep the running screen until the goroutine's final DoneMsg, got %+v", got.screen)
+	}
+	if !got.stopping {
+		t.Fatalf("q must put the model into the stopping state")
 	}
 	if !cancelled {
 		t.Fatalf("expected q to invoke the stored run cancel func")
 	}
-	if cmd == nil {
-		t.Fatalf("expected a cmd emitting the partial DoneMsg")
+	// No fabricated DoneMsg and no quit: exactly one DoneMsg ever exists — the
+	// final one from the background goroutine, which alone decides the paste
+	// question. A fabricated partial DoneMsg here used to race with the final
+	// one and could suppress the paste prompt entirely.
+	if cmd != nil {
+		t.Fatalf("q must not emit a message; the final DoneMsg comes from the goroutine")
 	}
-	msg := cmd()
-	if _, isQuit := msg.(tea.QuitMsg); isQuit {
-		t.Fatalf("q must not quit the program")
-	}
-	done, ok := msg.(DoneMsg)
-	if !ok {
-		t.Fatalf("expected DoneMsg from q cmd, got %T", msg)
-	}
-	if done.Tested != 3 || done.Success != 2 || done.Failed != 1 {
-		t.Fatalf("partial DoneMsg must carry current counters, got %+v", done)
+	if view := got.View(); !strings.Contains(view, "STOPPING") {
+		t.Fatalf("expected the stopping indicator in the running view, got %q", view)
 	}
 }
 
@@ -360,23 +360,20 @@ func TestModel_CtrlCOnRunningCancelsInsteadOfQuitting(t *testing.T) {
 	m.screen = ScreenRunning
 	m.tested, m.succeeded, m.failed = 3, 2, 1
 	m.links = []string{"vless://a#1"}
-	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
-	if cmd == nil {
-		t.Fatalf("expected a cmd from Ctrl+C on the running screen")
-	}
-	msg := cmd()
-	if _, isQuit := msg.(tea.QuitMsg); isQuit {
-		t.Fatalf("Ctrl+C on the running screen must cancel (so partial results get saved), not quit the program")
-	}
-	done, ok := msg.(DoneMsg)
-	if !ok {
-		t.Fatalf("expected partial DoneMsg from Ctrl+C, got %T", msg)
-	}
-	if done.Tested != 3 || done.Success != 2 || done.Failed != 1 || len(done.Links) != 1 {
-		t.Fatalf("partial DoneMsg must carry current counters and links, got %+v", done)
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	got := next.(Model)
+	if got.screen != ScreenRunning || !got.stopping {
+		t.Fatalf("Ctrl+C on the running screen must enter the stopping state, got screen=%v stopping=%v", got.screen, got.stopping)
 	}
 	if !cancelled {
 		t.Fatalf("expected Ctrl+C to invoke the stored run cancel func")
+	}
+	if cmd != nil {
+		msg := cmd()
+		if _, isQuit := msg.(tea.QuitMsg); isQuit {
+			t.Fatalf("Ctrl+C on the running screen must cancel (so partial results get saved), not quit the program")
+		}
+		t.Fatalf("Ctrl+C must not emit a message; the final DoneMsg comes from the goroutine, got %T", msg)
 	}
 }
 
@@ -408,5 +405,198 @@ func TestModel_QOnDoneQuits(t *testing.T) {
 	}
 	if _, isQuit := cmd().(tea.QuitMsg); !isQuit {
 		t.Fatalf("expected tea.QuitMsg from q on the done screen")
+	}
+}
+
+// interruptedRunModel drives a model to the running screen with healthy results
+// recorded, presses interruptKey, and returns the stopping model. This mirrors
+// what the real program does after q / Ctrl+C: cancel the context, show the
+// stopping state, and wait for the goroutine's single final DoneMsg.
+func interruptedRunModel(t *testing.T, interruptKey tea.KeyType, runes []rune) Model {
+	t.Helper()
+	cancelled := false
+	boundCancel = func() { cancelled = true }
+	t.Cleanup(func() { boundCancel = nil })
+
+	m := NewModel([]string{"https://a.com/s"}, "https://x.com", 20, 15*time.Second)
+	m.opts = Options{AskPaste: true}
+	m.screen = ScreenRunning
+	m.cfg = FormConfig{TargetURL: "https://x.com"}
+	m.tested, m.succeeded, m.failed = 3, 2, 1
+	m.links = []string{"vless://a#1", "ss://b#2"}
+
+	var key tea.KeyMsg
+	if runes != nil {
+		key = tea.KeyMsg{Type: interruptKey, Runes: runes}
+	} else {
+		key = tea.KeyMsg{Type: interruptKey}
+	}
+	next, cmd := m.Update(key)
+	got := next.(Model)
+	if got.screen != ScreenRunning || !got.stopping {
+		t.Fatalf("interrupt must enter the stopping state on the running screen, got screen=%v stopping=%v", got.screen, got.stopping)
+	}
+	if !cancelled {
+		t.Fatalf("expected the interrupt to invoke the run cancel func")
+	}
+	if cmd != nil {
+		t.Fatalf("the interrupt must not emit a message; the final DoneMsg comes from the goroutine")
+	}
+	return got
+}
+
+// TestModel_InterruptThenDoneMsgOffersPasteUpload is the core regression for
+// the bug where an interrupt could end the program without ever showing the
+// paste question: after q / Ctrl+C the single final DoneMsg (the only one the
+// model accepts) must land on the done screen WITH the paste prompt whenever
+// healthy links were saved, and both answers must work from there.
+func TestModel_InterruptThenDoneMsgOffersPasteUpload(t *testing.T) {
+	tests := []struct {
+		name string
+		key  tea.KeyType
+		hits []rune
+	}{
+		{"q key", tea.KeyRunes, []rune{'q'}},
+		{"ctrl+c", tea.KeyCtrlC, nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			stopping := interruptedRunModel(t, tt.key, tt.hits)
+
+			// The background goroutine finishes saving the partial results and
+			// sends its final DoneMsg — the only DoneMsg in the system.
+			next, _ := stopping.Update(DoneMsg{
+				Tested: 3, Success: 2, Failed: 1,
+				SavedFile: "results/x.md",
+				Links:     []string{"vless://a#1", "ss://b#2"},
+				Elapsed:   time.Second,
+			})
+			done := next.(Model)
+			if done.screen != ScreenDone {
+				t.Fatalf("expected the done screen after the final DoneMsg")
+			}
+			if done.stopping {
+				t.Fatalf("the final DoneMsg must clear the stopping state")
+			}
+			if !done.pastePrompt {
+				t.Fatalf("the paste question must be offered after an interrupted run that saved healthy links")
+			}
+			if view := done.View(); !strings.Contains(view, paste.Prompt) {
+				t.Fatalf("expected the paste question in the done view, got %q", view)
+			}
+
+			// Choosing yes starts the upload of the saved file.
+			next, cmd := done.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+			yes := next.(Model)
+			if !yes.pasteUploading || cmd == nil {
+				t.Fatalf("y must start the upload, got uploading=%v cmd=%v", yes.pasteUploading, cmd != nil)
+			}
+
+			// Choosing no keeps the results local.
+			next, cmd = done.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+			no := next.(Model)
+			if no.pastePrompt || no.pasteUploading || cmd != nil {
+				t.Fatalf("n must skip the upload, got prompt=%v uploading=%v cmd=%v", no.pastePrompt, no.pasteUploading, cmd != nil)
+			}
+			if !strings.Contains(no.notice, "skipped") {
+				t.Fatalf("expected the skipped notice after declining, got %q", no.notice)
+			}
+		})
+	}
+}
+
+// TestModel_InterruptDuringFetchShowsNoPrompt covers the earliest interruption
+// stage: the fetch phase, where no results file can exist. The final DoneMsg
+// carries no SavedFile, so no paste question may appear — but the done screen
+// must still be reached, and quitting from it stays possible.
+func TestModel_InterruptDuringFetchShowsNoPrompt(t *testing.T) {
+	stopping := interruptedRunModel(t, tea.KeyRunes, []rune{'q'})
+
+	next, _ := stopping.Update(DoneMsg{Notice: "No valid configs", Elapsed: time.Second})
+	done := next.(Model)
+	if done.screen != ScreenDone {
+		t.Fatalf("expected the done screen after the fetch-phase DoneMsg")
+	}
+	if done.pastePrompt {
+		t.Fatalf("no paste question may be offered when nothing was saved")
+	}
+	if !strings.Contains(done.View(), "No valid configs") {
+		t.Fatalf("expected the notice in the done view, got %q", done.View())
+	}
+	_, cmd := done.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
+	if cmd == nil {
+		t.Fatal("quitting from the prompt-less done screen must still work")
+	}
+}
+
+// TestModel_InterruptBeforeRunStartNeverStartsTheRun covers the narrow window
+// between Enter and the StartTestsMsg handling: an interrupt there must stop
+// the run from ever launching, and the done screen still becomes reachable via
+// the empty DoneMsg the StartTestsMsg handler emits.
+func TestModel_InterruptBeforeRunStartNeverStartsTheRun(t *testing.T) {
+	started := false
+	savedBound := bound
+	bound = nil // no background runner wired in this test
+	defer func() { bound = savedBound }()
+
+	m := NewModel([]string{"https://a.com/s"}, "https://x.com", 20, 15*time.Second)
+	m.opts = Options{AskPaste: true}
+	m.screen = ScreenRunning
+	m.cfg = FormConfig{TargetURL: "https://x.com"}
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
+	stopping := next.(Model)
+	if !stopping.stopping {
+		t.Fatalf("expected the stopping state after the early interrupt")
+	}
+
+	// The queued StartTestsMsg arrives after the interrupt.
+	next, cmd = stopping.Update(StartTestsMsg{Cfg: FormConfig{TargetURL: "https://x.com"}})
+	if cmd == nil {
+		t.Fatal("expected a cmd emitting the empty DoneMsg for the never-started run")
+	}
+	msg := cmd()
+	done, ok := msg.(DoneMsg)
+	if !ok {
+		t.Fatalf("expected a DoneMsg from the aborted start, got %T", msg)
+	}
+	if done.SavedFile != "" || done.Tested != 0 {
+		t.Fatalf("a never-started run must produce an empty DoneMsg, got %+v", done)
+	}
+	if done.Notice != "run never started" {
+		t.Fatalf("expected the run-never-started notice, got %q", done.Notice)
+	}
+	final, _ := stopping.Update(done)
+	got := final.(Model)
+	if got.screen != ScreenDone || got.stopping {
+		t.Fatalf("expected the done screen without the stopping state, got screen=%v stopping=%v", got.screen, got.stopping)
+	}
+	if got.pastePrompt {
+		t.Fatalf("no paste question may be offered when the run never started")
+	}
+	_ = started
+}
+
+// TestModel_RepeatedInterruptsAreIgnored pins that mashing q / Ctrl+C while
+// the run is winding down neither quits the program nor re-cancels anything.
+func TestModel_RepeatedInterruptsAreIgnored(t *testing.T) {
+	cancelCalls := 0
+	boundCancel = func() { cancelCalls++ }
+	defer func() { boundCancel = nil }()
+
+	m := NewModel([]string{"https://a.com/s"}, "https://x.com", 20, 15*time.Second)
+	m.screen = ScreenRunning
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
+	stopping := next.(Model)
+	next, cmd = stopping.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	got := next.(Model)
+	if !got.stopping || got.screen != ScreenRunning {
+		t.Fatalf("repeated interrupts must keep the stopping state, got screen=%v stopping=%v", got.screen, got.stopping)
+	}
+	if cmd != nil {
+		t.Fatalf("repeated interrupts must not emit a message")
+	}
+	if cancelCalls != 1 {
+		t.Fatalf("the cancel func must be invoked exactly once, got %d", cancelCalls)
 	}
 }

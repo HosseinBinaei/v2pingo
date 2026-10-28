@@ -80,6 +80,7 @@ type Model struct {
 	pasteRetry     bool
 	pasteErr       string
 	pasteUploading bool
+	stopping       bool
 	elapsed        time.Duration
 	notice         string
 	warning        string
@@ -180,6 +181,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, cmd
 	case StartTestsMsg:
+		if m.stopping {
+			// The user interrupted between Enter and this message: the run
+			// must never start, and the done screen still needs its single
+			// DoneMsg to become reachable.
+			return m, func() tea.Msg {
+				return DoneMsg{Elapsed: time.Since(m.start), Notice: "run never started"}
+			}
+		}
 		if bound != nil {
 			startBackgroundRun(bound, msg.Cfg, m.opts)
 		}
@@ -207,6 +216,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case DoneMsg:
 		m.screen = ScreenDone
+		m.stopping = false
 		m.tested, m.succeeded, m.failed = msg.Tested, msg.Success, msg.Failed
 		m.links, m.savedFile, m.elapsed = msg.Links, msg.SavedFile, msg.Elapsed
 		m.notice = msg.Notice
@@ -265,22 +275,24 @@ func (m Model) resolvePastePrompt(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, uploadResults(m.savedFile, m.opts.PasteEndpoint)
 }
 
-// cancelRun stops the in-flight run and emits a partial DoneMsg carrying the
-// counters and links collected so far. The process stays alive so the
-// background goroutine in run.go can finish and save the partial 2xx links
-// to the results file — the same guarantee the CLI has on Ctrl+C.
+// cancelRun stops the in-flight run. It only cancels the context and flips the
+// running screen into its "stopping" state; it deliberately emits no DoneMsg of
+// its own. The one and only DoneMsg comes from the background goroutine once it
+// has finished saving the partial healthy links, and it carries the SavedFile
+// path that decides whether the paste question is offered. Fabricating a second
+// DoneMsg here would race with the final one: whichever arrived last would
+// overwrite pastePrompt, so an interrupt could leave the done screen without
+// the paste question — or a q pressed during the gap could quit the program
+// before the question was ever shown.
 func (m Model) cancelRun() (tea.Model, tea.Cmd) {
+	if m.stopping {
+		return m, nil
+	}
 	if boundCancel != nil {
 		boundCancel()
 	}
-	partial := DoneMsg{
-		Tested:  m.tested,
-		Success: m.succeeded,
-		Failed:  m.failed,
-		Links:   m.links,
-		Elapsed: time.Since(m.start),
-	}
-	return m, func() tea.Msg { return partial }
+	m.stopping = true
+	return m, nil
 }
 
 // resultLine renders one live-log row. It deliberately shows only protocol,
@@ -361,14 +373,22 @@ func (m Model) viewRunning() string {
 	if m.warning != "" {
 		lines = append(lines, warnStyle.Render("⚠ "+clip(m.warning, innerWidth(w)-2)))
 	}
-	lines = append(lines, hintStyle.Render("Ctrl+C / q = stop and save partial results"))
+	if m.stopping {
+		lines = append(lines, hintStyle.Render("stopping — saving partial results, the summary follows…"))
+	} else {
+		lines = append(lines, hintStyle.Render("Ctrl+C / q = stop and save partial results"))
+	}
 	return strings.Join(lines, "\n")
 }
 
 // statusLines builds the left panel of the running dashboard.
 func (m Model) statusLines(contentW int) []string {
+	state := "▌ RUNNING "
+	if m.stopping {
+		state = "▌ STOPPING "
+	}
 	return []string{
-		accentStyle.Render("▌ RUNNING ") + m.spinner.View(),
+		accentStyle.Render(state) + m.spinner.View(),
 		"",
 		accentStyle.Render(fmt.Sprintf("%d / %d", m.tested, m.total)) + "  " + labelStyle.Render("CONFIGS"),
 		"",

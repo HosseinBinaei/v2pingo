@@ -433,6 +433,136 @@ func TestParseSOCKSPlainUserInfo(t *testing.T) {
 	}
 }
 
+// TestParseBareAddressAsSOCKS pins the rule that a bare "ip:port" entry — one
+// with no scheme or any other protocol information — is classified as SOCKS5.
+func TestParseBareAddressAsSOCKS(t *testing.T) {
+	tests := []struct {
+		name      string
+		raw       string
+		wantHost  string
+		wantPort  uint16
+		wantError bool
+	}{
+		{name: "IPv4 with common SOCKS5 port", raw: "1.2.3.4:1080", wantHost: "1.2.3.4", wantPort: 1080},
+		{name: "IPv4 with max port", raw: "255.255.255.255:65535", wantHost: "255.255.255.255", wantPort: 65535},
+		{name: "bracketed IPv6", raw: "[2001:db8::1]:1080", wantHost: "2001:db8::1", wantPort: 1080},
+		{name: "surrounding whitespace is trimmed", raw: "  5.6.7.8:1080  ", wantHost: "5.6.7.8", wantPort: 1080},
+		{name: "hostname is not a bare address", raw: "example.com:1080", wantError: true},
+		{name: "missing port", raw: "1.2.3.4", wantError: true},
+		{name: "zero port", raw: "1.2.3.4:0", wantError: true},
+		{name: "port out of range", raw: "1.2.3.4:70000", wantError: true},
+		{name: "non-numeric port", raw: "1.2.3.4:https", wantError: true},
+		{name: "trailing junk after port", raw: "1.2.3.4:1080:9", wantError: true},
+		{name: "remark makes it a share link, not a bare address", raw: "1.2.3.4:1080#node", wantError: true},
+		{name: "incomplete IPv4 literal", raw: "1.2.3:1080", wantError: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg, err := parser.ParseAndConvert(tt.raw, 20)
+			if tt.wantError {
+				if err == nil {
+					t.Fatalf("ParseAndConvert(%q) unexpectedly succeeded", tt.raw)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("ParseAndConvert(%q) error: %v", tt.raw, err)
+			}
+
+			if cfg.Protocol != "socks" {
+				t.Errorf("expected Protocol socks, got %s", cfg.Protocol)
+			}
+			if cfg.Host != tt.wantHost || cfg.Port != tt.wantPort {
+				t.Errorf("Host/Port mismatch: %s:%d, want %s:%d", cfg.Host, cfg.Port, tt.wantHost, tt.wantPort)
+			}
+			if cfg.RawLink != strings.TrimSpace(tt.raw) {
+				t.Errorf("RawLink mismatch: %q, want %q", cfg.RawLink, strings.TrimSpace(tt.raw))
+			}
+
+			socksOpt, ok := cfg.Options.Options.(*option.SOCKSOutboundOptions)
+			if !ok {
+				t.Fatalf("expected *option.SOCKSOutboundOptions, got %T", cfg.Options.Options)
+			}
+			if socksOpt.Server != tt.wantHost || socksOpt.ServerPort != tt.wantPort {
+				t.Errorf("Server/Port mismatch: %s:%d", socksOpt.Server, socksOpt.ServerPort)
+			}
+			if socksOpt.Version != "5" {
+				t.Errorf("Version mismatch: %s", socksOpt.Version)
+			}
+			if socksOpt.Username != "" || socksOpt.Password != "" {
+				t.Errorf("bare address must be unauthenticated, got %s / %s", socksOpt.Username, socksOpt.Password)
+			}
+		})
+	}
+}
+
+func TestIsBareAddress(t *testing.T) {
+	tests := []struct {
+		input string
+		want  bool
+	}{
+		{"1.2.3.4:1080", true},
+		{"0.0.0.0:1", true},
+		{"127.0.0.1:8080", true},
+		{"[::1]:1080", true},
+		{"[2001:db8::1]:443", true},
+		{"", false},
+		{"1.2.3.4", false},
+		{"1.2.3.4:", false},
+		{"1.2.3.4:0", false},
+		{"1.2.3.4:65536", false},
+		{"256.1.1.1:1080", false},
+		{"1.2.3:1080", false},
+		{"example.com:1080", false},
+		{"localhost:1080", false},
+		{"::1:1080", false}, // unbracketed IPv6 is ambiguous and rejected
+		{"socks5://1.2.3.4:1080", false},
+		{"ss://1.2.3.4:1080", false},
+		{"user@1.2.3.4:1080", false},
+		{"1.2.3.4:1080/path", false},
+		{"1.2.3.4:1080?query=1", false},
+		{"1.2.3.4:1080#remark", false},
+	}
+
+	for _, tt := range tests {
+		if got := parser.IsBareAddress(tt.input); got != tt.want {
+			t.Errorf("IsBareAddress(%q) = %v, want %v", tt.input, got, tt.want)
+		}
+	}
+}
+
+// TestDeduplicateConfigsBareAddresses checks that bare addresses flow through
+// the normal pipeline — deduplicated, indexed, and kept distinct from an
+// explicit socks5:// link to the same server.
+func TestDeduplicateConfigsBareAddresses(t *testing.T) {
+	rawLinks := []string{
+		"1.2.3.4:1080",
+		"ss://YWVzLTEyOC1nY206cGFzc0AxLjEuMS4xOjQ0Mw==#Node4",
+		"1.2.3.4:1080", // duplicate bare address
+		"socks5://user:pass@1.2.3.4:1080#ExplicitSOCKS",
+		"[2001:db8::1]:1080",
+	}
+
+	configs := parser.DeduplicateConfigs(rawLinks)
+	if len(configs) != 4 {
+		t.Fatalf("expected 4 configs, got %d: %+v", len(configs), configs)
+	}
+
+	wantProtocols := []string{"socks", "shadowsocks", "socks", "socks"}
+	for i, want := range wantProtocols {
+		if configs[i].Protocol != want {
+			t.Errorf("configs[%d].Protocol = %s, want %s", i, configs[i].Protocol, want)
+		}
+	}
+	if configs[0].Index != 1 || configs[0].Host != "1.2.3.4" || configs[0].Port != 1080 {
+		t.Errorf("bare address config mismatch: index=%d %s:%d", configs[0].Index, configs[0].Host, configs[0].Port)
+	}
+	if configs[2].RawLink != "socks5://user:pass@1.2.3.4:1080#ExplicitSOCKS" {
+		t.Errorf("explicit socks5 link should stay distinct from the bare address, got %q", configs[2].RawLink)
+	}
+}
+
 func TestParseHysteria2(t *testing.T) {
 	raw := "hysteria2://mypassword@hy2.example.com:8443?obfs=salamander&obfs-password=obfspass&sni=sni.example.com&insecure=1&up=50&down=120#HY2-Node"
 

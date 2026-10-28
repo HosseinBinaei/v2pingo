@@ -57,6 +57,27 @@ func parseSOCKS(rawLink string, index int) (*types.ProxyConfig, error) {
 		return nil, fmt.Errorf("invalid port in SOCKS link: %w", err)
 	}
 
+	return newSOCKSConfig(index, rawLink, host, port, username, password), nil
+}
+
+// parseBareSOCKS converts a bare "ip:port" address — a subscription entry
+// that carries no protocol information — into an unauthenticated SOCKS5
+// proxy. IsBareAddress defines the accepted grammar.
+func parseBareSOCKS(rawLink string, index int) (*types.ProxyConfig, error) {
+	host, portText, err := net.SplitHostPort(rawLink)
+	if err != nil {
+		return nil, fmt.Errorf("invalid bare address %q: %w", rawLink, err)
+	}
+	port, err := parsePortNumber(portText)
+	if err != nil {
+		return nil, fmt.Errorf("invalid port in bare address: %w", err)
+	}
+	return newSOCKSConfig(index, rawLink, host, port, "", ""), nil
+}
+
+// newSOCKSConfig builds the sing-box SOCKS5 outbound shared by every SOCKS
+// variant: scheme-prefixed links and bare addresses alike.
+func newSOCKSConfig(index int, rawLink, host string, port uint16, username, password string) *types.ProxyConfig {
 	socksOptions := option.SOCKSOutboundOptions{
 		ServerOptions: option.ServerOptions{
 			Server:     host,
@@ -78,5 +99,5 @@ func parseSOCKS(rawLink string, index int) (*types.ProxyConfig, error) {
 			Tag:     "proxy",
 			Options: &socksOptions,
 		},
-	}, nil
+	}
 }

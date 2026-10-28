@@ -190,6 +190,44 @@ wg://privatekey@6.6.6.6:2408?publickey=publickey&address=10.0.0.2/32#WGAlias
 	}
 }
 
+// TestExtractProxyLinksBareAddresses pins that bare "ip:port" lines are
+// extracted (later classified as SOCKS5) while look-alikes that are not plain
+// IP addresses keep being ignored.
+func TestExtractProxyLinksBareAddresses(t *testing.T) {
+	input := `
+# Plain SOCKS5 address list
+1.2.3.4:1080
+5.6.7.8:1080
+# Not bare addresses
+example.com:1080
+1.2.3.4
+1.2.3.4:0
+1.2.3.4:70000
+256.1.1.1:1080
+# Mixed with scheme links
+ss://YWVzLTEyOC1nY206cGFzc0AxLjEuMS4xOjQ0Mw==#Node4
+socks5://user:pass@9.9.9.9:1080#Explicit
+[2001:db8::1]:1080
+`
+	links := ExtractProxyLinks(input)
+	expected := []string{
+		"1.2.3.4:1080",
+		"5.6.7.8:1080",
+		"ss://YWVzLTEyOC1nY206cGFzc0AxLjEuMS4xOjQ0Mw==#Node4",
+		"socks5://user:pass@9.9.9.9:1080#Explicit",
+		"[2001:db8::1]:1080",
+	}
+
+	if len(links) != len(expected) {
+		t.Fatalf("ExtractProxyLinks returned %d links, want %d: %v", len(links), len(expected), links)
+	}
+	for i, exp := range expected {
+		if links[i] != exp {
+			t.Errorf("links[%d] = %q, want %q", i, links[i], exp)
+		}
+	}
+}
+
 func TestDecodePayload(t *testing.T) {
 	sampleLinks := []string{
 		"vless://uuid-1@1.1.1.1:443?security=tls#Node1",
@@ -279,6 +317,45 @@ func TestDecodePayload(t *testing.T) {
 		got := DecodePayload([]byte("random binary garbage \x00\x01\x02 \r\n not a config"))
 		if len(got) != 0 {
 			t.Errorf("expected 0 links for garbage, got %d", len(got))
+		}
+	})
+
+	t.Run("Plain text payload with bare addresses", func(t *testing.T) {
+		got := DecodePayload([]byte("1.2.3.4:1080\nexample.com:1080\n5.6.7.8:1080\n"))
+		want := []string{"1.2.3.4:1080", "5.6.7.8:1080"}
+		if len(got) != len(want) {
+			t.Fatalf("DecodePayload returned %d links, want %d: %v", len(got), len(want), got)
+		}
+		for i, exp := range want {
+			if got[i] != exp {
+				t.Errorf("got[%d] = %q, want %q", i, got[i], exp)
+			}
+		}
+	})
+
+	t.Run("Whole-payload base64 of bare addresses", func(t *testing.T) {
+		encoded := base64.StdEncoding.EncodeToString([]byte("1.2.3.4:1080\n5.6.7.8:1080\n"))
+		got := DecodePayload([]byte(encoded))
+		if len(got) != 2 {
+			t.Fatalf("DecodePayload returned %d links, want 2: %v", len(got), got)
+		}
+		if got[0] != "1.2.3.4:1080" || got[1] != "5.6.7.8:1080" {
+			t.Errorf("bare address links mismatch: %v", got)
+		}
+	})
+
+	t.Run("Bare address line next to a base64 line", func(t *testing.T) {
+		b64part := base64.StdEncoding.EncodeToString([]byte("vless://b64@5.5.5.5:443#B64Node"))
+		mixed := "1.2.3.4:1080\n" + b64part + "\n"
+		got := DecodePayload([]byte(mixed))
+		if len(got) != 2 {
+			t.Fatalf("DecodePayload returned %d links, want 2: %v", len(got), got)
+		}
+		if got[0] != "1.2.3.4:1080" {
+			t.Errorf("got[0] = %q, want the bare address", got[0])
+		}
+		if got[1] != "vless://b64@5.5.5.5:443#B64Node" {
+			t.Errorf("got[1] = %q, want the decoded share link", got[1])
 		}
 	})
 }
