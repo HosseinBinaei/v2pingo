@@ -98,11 +98,14 @@ concurrency and timeout controls.
   - Once the results file is written, the tool asks whether to upload it to
     [paste.rs](https://paste.rs) — answering `y` / `yes` uploads it and prints the link, any
     other answer simply keeps the local file.
+  - Automatic fallback: if paste.rs fails (HTTP error, timeout, DNS/TLS or any connectivity
+    problem), the same file is tried against [paste.c-net.org](https://paste.c-net.org/) and
+    then [dpaste.org](https://dpaste.org/), and the first successful link is printed.
   - The question is asked only when a results file with healthy configurations actually exists;
     empty runs save nothing and are never asked about.
   - If the upload fails, the error is reported and you are asked whether to retry.
   - Skip the question entirely with `-paste=false`, or point it at another paste service with
-    `-paste-url`.
+    `-paste-url` (a custom endpoint is used alone, without the built-in fallbacks).
   - The TUI shows the same questions on its done screen.
 
 ---
@@ -341,7 +344,21 @@ Paste link: https://paste.rs/AbCdE
 Answering anything other than `y` / `yes` ends the run with the results still saved locally
 (`Giving up on paste upload; results remain saved locally.`).
 
-Skip the question altogether, or send it to another paste service that follows the same API:
+#### Automatic fallback services
+
+The upload does not depend on a single service. paste.rs is tried first; if it fails with any
+HTTP error, timeout, DNS/TLS problem or connectivity issue, the same file is automatically
+tried against the next service, in order:
+
+1. [paste.rs](https://paste.rs/) — raw POST body, the link comes back in the response.
+2. [paste.c-net.org](https://paste.c-net.org/) — same raw POST body style.
+3. [dpaste.org](https://dpaste.org/) — form API (`content` field, plain text).
+
+The printed `Paste link:` may therefore come from any of the three. If every service fails,
+the error message lists each endpoint that was tried, and you can retry or give up as usual.
+
+Skip the question altogether, or send it to another paste service that follows the same API
+(a custom `-paste-url` endpoint is used alone, without the built-in fallbacks):
 
 ```bash
 ./v2pingo -paste=false
@@ -445,7 +462,7 @@ Refresh subscriptions from GitHub? [y/N]:
 | `-cache-dir` | `string` | `cache` | Directory that keeps the fetched subscription files. |
 | `-v`, `-verbose` | `bool` | `false` | Enable verbose output (prints failed tests). |
 | `-paste` | `bool` | `true` | Ask whether to upload the saved results file to the paste service (`false` never asks). |
-| `-paste-url` | `string` | `https://paste.rs/` | Paste service endpoint used when `-paste` is enabled. |
+| `-paste-url` | `string` | `https://paste.rs/` | Paste service endpoint used when `-paste` is enabled. The default gets automatic fallbacks (paste.c-net.org, then dpaste.org); a custom endpoint is used alone. |
 
 ---
 
@@ -568,8 +585,10 @@ Paste link: https://paste.rs/AbCdE
 ```
 
 Any other answer prints `Skipped paste upload.` and nothing is sent. A failed upload is reported
-and followed by a retry question. On the TUI's done screen the same questions are answered with
-a single key and a successful link appears as a `Paste:` line.
+and followed by a retry question. Uploads fall back automatically from paste.rs to
+paste.c-net.org and then dpaste.org when the primary service fails. On the TUI's done screen
+the same questions are answered with a single key and a successful link appears as a `Paste:`
+line.
 
 ---
 
@@ -614,7 +633,8 @@ sub-input.txt (one URL per line) + custom -sub URLs
  [Reporter & Sanitizer]  ──► Live progress & final summary
        │
        ▼
- [Paste Publisher]       ──► On "yes": POST results_*.md to paste.rs, print the link
+ [Paste Publisher]       ──► On "yes": POST results_*.md to paste.rs
+       │                     (fallbacks: paste.c-net.org, dpaste.org), print the link
 ```
 
 ---
