@@ -51,7 +51,7 @@ func main() {
 	flag.Var(&subFlags, "sub", "Custom subscription URL (repeatable or comma-separated)")
 	tuiFlag := flag.Bool("tui", true, "Launch interactive terminal UI")
 	pasteFlag := flag.Bool("paste", true, "Ask whether to upload the saved results file to paste.rs")
-	pasteURLFlag := flag.String("paste-url", paste.DefaultEndpoint, "Paste service endpoint used by -paste")
+	pasteURLFlag := flag.String("paste-url", paste.DefaultEndpoint, "Paste service endpoint used by -paste (a custom endpoint disables the built-in fallback services)")
 	cacheFlag := flag.Bool("cache", true, "Ask whether to reuse the cached subscription files (false disables the cache)")
 	cacheDirFlag := flag.String("cache-dir", subscription.DefaultCacheDir, "Directory that keeps the fetched subscription files")
 
