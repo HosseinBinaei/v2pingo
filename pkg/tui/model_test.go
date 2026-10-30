@@ -607,3 +607,41 @@ func TestModel_RepeatedInterruptsAreIgnored(t *testing.T) {
 		t.Fatalf("the cancel func must be invoked exactly once, got %d", cancelCalls)
 	}
 }
+
+// TestModelUpdateNoticeRendersOnForm verifies that the one-line update notice
+// delivered through the Options channel shows up on the form screen, and that
+// a model without a channel (dev builds, CLI mode) never waits for one.
+func TestModelUpdateNoticeRendersOnForm(t *testing.T) {
+	m := NewModel([]string{"https://a.com/s"}, "https://cloudflare.com", 20, 15*time.Second)
+	if cmd := m.waitUpdate(); cmd != nil {
+		t.Fatal("a nil update channel must produce no command at all")
+	}
+
+	ch := make(chan string, 1)
+	ch <- "Update available: v9.9.9 (you are running v1.0.0) — https://github.com/HosseinBinaei/v2pingo/releases/latest"
+	m.opts.UpdateChan = ch
+	cmd := m.waitUpdate()
+	if cmd == nil {
+		t.Fatal("a set update channel must produce a waiting command")
+	}
+
+	msg := cmd()
+	next, _ := m.Update(msg)
+	got := next.(Model)
+	if got.updateNotice == "" {
+		t.Fatal("the notice must be stored on the model")
+	}
+	if view := got.View(); !strings.Contains(view, "v9.9.9") {
+		t.Errorf("the form view must show the update notice, got:\n%s", view)
+	}
+
+	// An empty notice (run is current, or the probe failed) renders nothing.
+	ch <- ""
+	empty := NewModel(nil, "", 1, time.Second)
+	empty.opts.UpdateChan = ch
+	next, _ = empty.Update(empty.waitUpdate()())
+	view := next.(Model).View()
+	if strings.Contains(view, "Update available") {
+		t.Errorf("an empty notice must render nothing, got:\n%s", view)
+	}
+}

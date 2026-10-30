@@ -59,6 +59,12 @@ type TotalMsg struct{ Total int }
 // rendered frame.
 type NoticeMsg struct{ Text string }
 
+// UpdateNoticeMsg carries the single-line "a newer release exists" notice from
+// the background probe (empty when the run is current or the probe failed).
+// Like every message it is rendered through the loop, so the frame is never
+// corrupted by the check.
+type UpdateNoticeMsg struct{ Text string }
+
 // TypesFoundMsg carries the per-type counts of the fetched links plus the raw
 // links themselves so the model can hand them to the run once the user has
 // confirmed the type selection.
@@ -108,6 +114,7 @@ type Model struct {
 	elapsed        time.Duration
 	notice         string
 	warning        string
+	updateNotice   string
 	opts           Options
 	start          time.Time
 	spinner        spinner.Model
@@ -248,9 +255,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.start = time.Now()
 			}
 			return m, nil
-	case NoticeMsg:
-		m.warning = msg.Text
-		return m, nil
+		case NoticeMsg:
+			m.warning = msg.Text
+			return m, nil
+		case UpdateNoticeMsg:
+			m.updateNotice = msg.Text
+			return m, nil
 	case ResultMsg:
 		m.tested++
 		if msg.Res.Success {
@@ -446,8 +456,25 @@ func (m Model) View() string {
 	}
 }
 
-// Init starts the cursor blink and the dashboard spinner.
-func (m Model) Init() tea.Cmd { return tea.Batch(textinput.Blink, m.spinner.Tick) }
+// Init starts the cursor blink, the dashboard spinner and the wait for the
+// background update notice.
+func (m Model) Init() tea.Cmd {
+	return tea.Batch(textinput.Blink, m.spinner.Tick, m.waitUpdate())
+}
+
+// waitUpdate waits for the one-line update notice the probe left on the
+// options channel and delivers it to the form screen. Waiting happens on the
+// command's own goroutine, so the run is never delayed; with no probe running
+// (a dev build or CLI mode) there is nothing to wait for.
+func (m Model) waitUpdate() tea.Cmd {
+	if m.opts.UpdateChan == nil {
+		return nil
+	}
+	ch := m.opts.UpdateChan
+	return func() tea.Msg {
+		return UpdateNoticeMsg{Text: <-ch}
+	}
+}
 
 // viewForm renders the configuration screen.
 func (m Model) viewForm() string {
@@ -476,12 +503,15 @@ func (m Model) viewForm() string {
 		subs = "no subscription URL preloaded"
 	}
 
-	return strings.Join([]string{
-		m.header(w, accentStyle.Render("● SETUP"), "configure a new test run"),
+	top := []string{m.header(w, accentStyle.Render("● SETUP"), "configure a new test run")}
+	if m.updateNotice != "" {
+		top = append(top, hintStyle.Render(clip(m.updateNotice, content)))
+	}
+	return strings.Join(append(top,
 		box("Sources", w, 0, dimStyle.Render(clip(m.sourceLine(), content)), hintStyle.Render(clip(subs, content))),
 		box("Parameters", w, 0, lines...),
 		hintStyle.Render("Tab = next field · Enter = start run · Ctrl+C = quit"),
-	}, "\n")
+	), "\n")
 }
 
 // viewTypeFilter renders the type-selection screen: a loading state while the

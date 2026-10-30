@@ -36,6 +36,10 @@ type Options struct {
 	// screen; when set, that screen is skipped and the filter is applied
 	// right after the fetch.
 	Types []string
+	// UpdateChan carries at most one single-line notice about a newer GitHub
+	// release, produced by a background probe that never blocks the run. The
+	// form screen renders the line when it arrives; nil disables the check.
+	UpdateChan <-chan string
 }
 
 // PasteDoneMsg carries the outcome of an on-demand paste upload.
