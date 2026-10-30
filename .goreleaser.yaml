@@ -1,0 +1,56 @@
+# GoReleaser configuration — https://goreleaser.com
+#
+# Release flow: tag and push, the GitHub Actions workflow in
+# .github/workflows/release.yml runs `goreleaser release` for you:
+#
+#   git tag v1.0.0
+#   git push origin v1.0.0
+version: 2
+
+project_name: v2pingo
+
+builds:
+  - id: v2pingo
+    main: ./cmd/v2pingo
+    binary: v2pingo
+    # Fully static binaries: run anywhere without libc or other dependencies.
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - windows
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    # -trimpath removes local paths from the binary;
+    # -s -w strips the symbol table and DWARF data, shrinking it considerably.
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
+
+archives:
+  - id: v2pingo
+    # tar.gz everywhere, zip for Windows (explorer-friendly).
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  # SHA256 sums of every artifact, uploaded as checksums.txt.
+  name_template: "checksums.txt"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+
+release:
+  draft: false
+  prerelease: auto
