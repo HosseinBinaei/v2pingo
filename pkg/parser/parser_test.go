@@ -563,6 +563,42 @@ func TestDeduplicateConfigsBareAddresses(t *testing.T) {
 	}
 }
 
+func TestDeduplicateConfigsBareAddressMatchesSchemelessSOCKS(t *testing.T) {
+	cases := []struct {
+		name  string
+		raws  []string
+		count int
+	}{
+		{"socks5 scheme before bare", []string{"socks5://148.251.68.232:8888", "148.251.68.232:8888"}, 1},
+		{"bare before socks5 scheme", []string{"148.251.68.232:8888", "socks5://148.251.68.232:8888"}, 1},
+		{"socks scheme before bare", []string{"socks://1.2.3.4:1080", "1.2.3.4:1080"}, 1},
+		{"uppercase scheme before bare", []string{"SOCKS5://1.2.3.4:1080", "1.2.3.4:1080"}, 1},
+		{"ipv6 scheme before bare", []string{"socks5://[2001:db8::1]:1080", "[2001:db8::1]:1080"}, 1},
+		{"remark on scheme link", []string{"socks5://1.2.3.4:1080#Node", "1.2.3.4:1080"}, 1},
+		{"different ports stay distinct", []string{"socks5://1.2.3.4:1080", "1.2.3.4:1081"}, 2},
+		{"userinfo link stays distinct from bare", []string{"socks5://user:pass@1.2.3.4:1080", "1.2.3.4:1080"}, 2},
+		{"non-socks links unaffected", []string{"trojan://pass@example.com:443#A", "example.com:443"}, 1},
+	}
+
+	for _, tc := range cases {
+		configs := parser.DeduplicateConfigs(tc.raws)
+		if len(configs) != tc.count {
+			t.Errorf("%s: expected %d configs, got %d: %+v", tc.name, tc.count, len(configs), configs)
+		}
+	}
+}
+
+func TestDeduplicateAppendBareAddressMatchesSchemelessSOCKSAcrossBatches(t *testing.T) {
+	seen := make(map[string]bool)
+
+	first, next := parser.DeduplicateAppend([]string{"148.251.68.232:8888"}, seen, 1)
+	second, _ := parser.DeduplicateAppend([]string{"socks5://148.251.68.232:8888"}, seen, next)
+
+	if len(first) != 1 || len(second) != 0 {
+		t.Fatalf("expected the schemeless socks link to be dropped across batches, got first=%d second=%d", len(first), len(second))
+	}
+}
+
 func TestParseHysteria2(t *testing.T) {
 	raw := "hysteria2://mypassword@hy2.example.com:8443?obfs=salamander&obfs-password=obfspass&sni=sni.example.com&insecure=1&up=50&down=120#HY2-Node"
 

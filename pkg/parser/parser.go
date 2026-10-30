@@ -107,7 +107,33 @@ func IsBareAddress(s string) bool {
 	return net.ParseIP(host) != nil
 }
 
-// DeduplicateConfigs parses raw links, removes duplicates based on their stripped URI,
+// dedupKey returns the identity key used to detect duplicate links. A bare
+// "ip:port" address and a "socks5://" or "socks://" link without userinfo
+// parse to the same unauthenticated SOCKS5 proxy, so they share one key;
+// every other link is keyed by its remark-stripped form. Links carrying
+// userinfo keep their raw key, because credentials make them a different
+// proxy than the bare address of the same host:port.
+func dedupKey(rawLink string) string {
+	stripped := StripRemark(rawLink)
+	if IsBareAddress(stripped) {
+		return "socks5://" + stripped
+	}
+
+	body, ok := stripSchemePrefix(stripped, "socks5://", "socks://")
+	if !ok || body == "" {
+		return stripped
+	}
+	if queryIndex := strings.Index(body, "?"); queryIndex != -1 {
+		body = body[:queryIndex]
+	}
+	if strings.Contains(body, "@") {
+		return stripped
+	}
+	return "socks5://" + body
+}
+
+// DeduplicateConfigs parses raw links, removes duplicates based on their normalized identity —
+// so a bare "ip:port" address and its equivalent SOCKS scheme link count as one —
 // and returns normalized ProxyConfig items with 1-based sequential indices.
 func DeduplicateConfigs(rawLinks []string) []types.ProxyConfig {
 	configs, _ := DeduplicateAppend(rawLinks, make(map[string]bool), 1)
@@ -124,8 +150,8 @@ func DeduplicateAppend(rawLinks []string, seen map[string]bool, startIndex int) 
 	currentIndex := startIndex
 
 	for _, raw := range rawLinks {
-		stripped := StripRemark(raw)
-		if seen[stripped] {
+		key := dedupKey(raw)
+		if seen[key] {
 			continue
 		}
 
@@ -134,7 +160,7 @@ func DeduplicateAppend(rawLinks []string, seen map[string]bool, startIndex int) 
 			continue
 		}
 
-		seen[stripped] = true
+		seen[key] = true
 		configs = append(configs, *cfg)
 		currentIndex++
 	}
