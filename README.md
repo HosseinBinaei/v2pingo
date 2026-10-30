@@ -460,6 +460,7 @@ Refresh subscriptions from GitHub? [y/N]:
 | `-sub` | `string` | *(empty)* | Custom subscription URL(s) (repeatable or comma-separated). |
 | `-cache` | `bool` | `true` | Ask whether to reuse the cached subscription files; `false` disables the cache and always downloads fresh copies. |
 | `-cache-dir` | `string` | `cache` | Directory that keeps the fetched subscription files. |
+| `-types` | `string` | *(empty)* | Comma-separated config types to test (`vmess, vless, trojan, ss, socks, hysteria2, wireguard`; aliases `ss/socks5/hy2/wg` accepted). Empty tests everything and asks on the TUI type-filter screen; a value skips that screen and filters right after the fetch. |
 | `-v`, `-verbose` | `bool` | `false` | Enable verbose output (prints failed tests). |
 | `-paste` | `bool` | `true` | Ask whether to upload the saved results file to the paste service (`false` never asks). |
 | `-paste-url` | `string` | `https://paste.rs/` | Paste service endpoint used when `-paste` is enabled. The default gets automatic fallbacks (paste.c-net.org, then dpaste.org); a custom endpoint is used alone. |
@@ -500,6 +501,11 @@ UI when stdout is a terminal (`-tui=true`):
 - Fill in target URL, concurrency (1–200), timeout, subscriptions, then run. Live progress, the
   summary, the results-file path and the optional paste upload are all shown on the done screen
   (`y` = upload/retry, any other key = skip/give up).
+- After Enter, the sources are fetched and a **Type Filter** screen lists every config type
+  actually present with its count (all pre-checked). Toggle types with `space`, flip all with
+  `a`, and press `Enter` to test only the selected types — unselected types are never parsed
+  or tested. Passing `-types` on the command line skips this screen and applies the filter
+  directly.
 
 Force non-interactive CLI mode (CI, scripts, piping) with:
 

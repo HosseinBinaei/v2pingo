@@ -7,6 +7,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"v2pingo/pkg/parser"
 	"v2pingo/pkg/paste"
 	"v2pingo/pkg/subscription"
 	"v2pingo/pkg/types"
@@ -100,12 +101,18 @@ func TestModel_NewRunClearsStaleWarning(t *testing.T) {
 	if got := warned.(Model); got.warning == "" {
 		t.Fatal("expected the warning to be stored first")
 	}
+	// Form → type filter → confirmed → running; the warning must start clean.
 	done, _ := warned.(Model).Update(DoneMsg{Tested: 1, Success: 1})
 	backToForm, _ := done.(Model).Update(tea.KeyMsg{Type: tea.KeyEnter})
-	running, _ := backToForm.(Model).Update(tea.KeyMsg{Type: tea.KeyEnter})
+	filtering, _ := backToForm.(Model).Update(tea.KeyMsg{Type: tea.KeyEnter})
+	populated, _ := filtering.(Model).Update(TypesFoundMsg{
+		Counts: []parser.TypeCount{{Type: "socks", Count: 1}},
+		Links:  []string{"1.2.3.4:1080"},
+	})
+	running, _ := populated.(Model).Update(tea.KeyMsg{Type: tea.KeyEnter})
 	got := running.(Model)
 	if got.screen != ScreenRunning {
-		t.Fatalf("expected the second Enter to start a run, got screen %v", got.screen)
+		t.Fatalf("expected the confirmed filter to start a run, got screen %v", got.screen)
 	}
 	if got.warning != "" {
 		t.Fatalf("a new run must start with a clean warning line, got %q", got.warning)

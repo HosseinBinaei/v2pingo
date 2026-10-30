@@ -78,6 +78,7 @@ func main() {
 			PasteEndpoint: *pasteURLFlag,
 			FetchMode:     resolveFetchMode(reader, cacheDir),
 			CacheDir:      cacheDir,
+			Types:         typeFilter,
 		}); err != nil {
 			fmt.Fprintf(os.Stderr, "TUI error: %v\n", err)
 			os.Exit(1)

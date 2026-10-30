@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"v2pingo/pkg/parser"
 	"v2pingo/pkg/paste"
 	"v2pingo/pkg/subscription"
 	"v2pingo/pkg/types"
@@ -19,6 +20,7 @@ type Screen int
 
 const (
 	ScreenForm Screen = iota
+	ScreenTypeFilter
 	ScreenRunning
 	ScreenDone
 )
@@ -57,8 +59,24 @@ type TotalMsg struct{ Total int }
 // rendered frame.
 type NoticeMsg struct{ Text string }
 
-// StartTestsMsg triggers the background fetch+test goroutine.
-type StartTestsMsg struct{ Cfg FormConfig }
+// TypesFoundMsg carries the per-type counts of the fetched links plus the raw
+// links themselves so the model can hand them to the run once the user has
+// confirmed the type selection.
+type TypesFoundMsg struct {
+	Counts []parser.TypeCount
+	Links  []string
+}
+
+// FetchSourcesMsg triggers the background fetch goroutine.
+type FetchSourcesMsg struct{ Cfg FormConfig }
+
+// StartTestsMsg triggers the background filter+test goroutine; Types holds the
+// canonical names selected on the type-filter screen (or from -types) and an
+// empty value tests everything.
+type StartTestsMsg struct {
+	Cfg   FormConfig
+	Types []string
+}
 
 // Model is the single BubbleTea model for form, running, and done screens.
 type Model struct {
@@ -68,6 +86,12 @@ type Model struct {
 	formErr        string
 	subs           []string
 	cfg            FormConfig
+	rawLinks       []string
+	typeCounts     []parser.TypeCount
+	typeChecked    []bool
+	typeCursor     int
+	typeLoading    bool
+	typeErr        string
 	total          int
 	tested         int
 	succeeded      int
@@ -136,6 +160,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.screen == ScreenDone && m.pastePrompt {
 			return m.resolvePastePrompt(msg)
 		}
+		if m.screen == ScreenTypeFilter {
+			return m.updateTypeFilterKeys(msg)
+		}
 		switch msg.Type {
 		case tea.KeyCtrlC:
 			if m.screen == ScreenRunning {
@@ -158,10 +185,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				m.formErr = ""
 				m.cfg = cfg
-				m.screen = ScreenRunning
+				m.screen = ScreenTypeFilter
+				m.typeLoading = true
+				m.typeCounts, m.typeChecked, m.typeCursor, m.typeErr = nil, nil, 0, ""
+				m.rawLinks = nil
 				m.start = time.Now()
 				m.warning = "" // a fresh run starts with a clean warning line
-				return m, func() tea.Msg { return StartTestsMsg{Cfg: cfg} }
+				return m, func() tea.Msg { return FetchSourcesMsg{Cfg: cfg} }
 			}
 			if m.screen == ScreenDone {
 				m.screen = ScreenForm
@@ -180,22 +210,44 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 		return m, cmd
-	case StartTestsMsg:
-		if m.stopping {
-			// The user interrupted between Enter and this message: the run
-			// must never start, and the done screen still needs its single
-			// DoneMsg to become reachable.
-			return m, func() tea.Msg {
-				return DoneMsg{Elapsed: time.Since(m.start), Notice: "run never started"}
+		case FetchSourcesMsg:
+			if bound != nil {
+				startFetch(bound, msg.Cfg, m.opts)
 			}
-		}
-		if bound != nil {
-			startBackgroundRun(bound, msg.Cfg, m.opts)
-		}
-		return m, nil
-	case TotalMsg:
-		m.total = msg.Total
-		return m, nil
+			return m, nil
+		case TypesFoundMsg:
+			m.typeLoading = false
+			m.typeCounts = msg.Counts
+			m.typeChecked = make([]bool, len(msg.Counts))
+			for i := range m.typeChecked {
+				m.typeChecked[i] = true
+			}
+			m.typeCursor = 0
+			m.typeErr = ""
+			m.rawLinks = msg.Links
+			return m, nil
+		case StartTestsMsg:
+			if m.stopping {
+				// The user interrupted between Enter and this message: the run
+				// must never start, and the done screen still needs its single
+				// DoneMsg to become reachable.
+				return m, func() tea.Msg {
+					return DoneMsg{Elapsed: time.Since(m.start), Notice: "run never started"}
+				}
+			}
+			if bound != nil {
+				startTests(bound, msg.Cfg, m.opts, m.rawLinks, msg.Types)
+			}
+			return m, nil
+		case TotalMsg:
+			m.total = msg.Total
+			if m.screen == ScreenTypeFilter {
+				// The -types path skips the selector: the first test message
+				// is what moves the UI to the running screen.
+				m.screen = ScreenRunning
+				m.start = time.Now()
+			}
+			return m, nil
 	case NoticeMsg:
 		m.warning = msg.Text
 		return m, nil
@@ -275,6 +327,80 @@ func (m Model) resolvePastePrompt(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, uploadResults(m.savedFile, m.opts.PasteEndpoint)
 }
 
+// updateTypeFilterKeys handles the type-selection screen: Ctrl+C always quits,
+// every other key is ignored while the sources are still being fetched, and
+// once the list is up the arrows/space/a drive the checkboxes and Enter starts
+// the filtered run.
+func (m Model) updateTypeFilterKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if msg.Type == tea.KeyCtrlC {
+		return m, tea.Quit
+	}
+	if m.typeLoading {
+		return m, nil
+	}
+	switch msg.String() {
+	case "up", "k":
+		if m.typeCursor > 0 {
+			m.typeCursor--
+		}
+	case "down", "j":
+		if m.typeCursor < len(m.typeCounts)-1 {
+			m.typeCursor++
+		}
+	case " ":
+		if m.typeCursor < len(m.typeChecked) {
+			next := make([]bool, len(m.typeChecked))
+			copy(next, m.typeChecked)
+			next[m.typeCursor] = !next[m.typeCursor]
+			m.typeChecked = next
+			m.typeErr = ""
+		}
+	case "a":
+		m.typeChecked = invertTypes(m.typeChecked)
+		m.typeErr = ""
+	case "enter":
+		selected := m.selectedTypes()
+		if len(selected) == 0 {
+			m.typeErr = "select at least one type (space toggles, a selects all)"
+			return m, nil
+		}
+		m.typeErr = ""
+		m.screen = ScreenRunning
+		m.start = time.Now()
+		m.warning = ""
+		return m, func() tea.Msg { return StartTestsMsg{Cfg: m.cfg, Types: selected} }
+	}
+	return m, nil
+}
+
+// invertTypes returns a new checked slice with every type flipped: all checked
+// becomes none checked, and anything else becomes all checked.
+func invertTypes(checked []bool) []bool {
+	all := true
+	for _, c := range checked {
+		if !c {
+			all = false
+			break
+		}
+	}
+	out := make([]bool, len(checked))
+	for i := range out {
+		out[i] = !all
+	}
+	return out
+}
+
+// selectedTypes lists the canonical type names whose checkbox is ticked.
+func (m Model) selectedTypes() []string {
+	var out []string
+	for i, c := range m.typeCounts {
+		if i < len(m.typeChecked) && m.typeChecked[i] {
+			out = append(out, c.Type)
+		}
+	}
+	return out
+}
+
 // cancelRun stops the in-flight run. It only cancels the context and flips the
 // running screen into its "stopping" state; it deliberately emits no DoneMsg of
 // its own. The one and only DoneMsg comes from the background goroutine once it
@@ -309,6 +435,8 @@ func (m Model) resultLine(res types.TestResult) string {
 // View renders the active screen.
 func (m Model) View() string {
 	switch m.screen {
+	case ScreenTypeFilter:
+		return m.viewTypeFilter()
 	case ScreenRunning:
 		return m.viewRunning()
 	case ScreenDone:
@@ -354,6 +482,56 @@ func (m Model) viewForm() string {
 		box("Parameters", w, 0, lines...),
 		hintStyle.Render("Tab = next field · Enter = start run · Ctrl+C = quit"),
 	}, "\n")
+}
+
+// viewTypeFilter renders the type-selection screen: a loading state while the
+// sources are fetched, then the checkbox list with real per-type counts.
+func (m Model) viewTypeFilter() string {
+	w := m.frameWidth()
+	inner := innerWidth(w)
+
+	var body []string
+	if m.typeLoading {
+		body = append(body, accentStyle.Render("▌ FETCHING ")+m.spinner.View(), "", dimStyle.Render("reading the subscription sources…"))
+	} else {
+		body = append(body, hintStyle.Render(clip("unselected types are never parsed or tested", inner)), "")
+		for i, c := range m.typeCounts {
+			cursor := "  "
+			if i == m.typeCursor {
+				cursor = accentStyle.Render("▸ ")
+			}
+			mark := "[ ]"
+			if m.typeChecked[i] {
+				mark = okStyle.Render("[x]")
+			}
+			body = append(body, cursor+mark+" "+valueStyle.Render(fmt.Sprintf("%-13s", c.Type))+dimStyle.Render(fmt.Sprintf("%8s configs", humanCount(c.Count))))
+		}
+		selected, total := 0, 0
+		for i, c := range m.typeCounts {
+			if m.typeChecked[i] {
+				selected++
+				total += c.Count
+			}
+		}
+		body = append(body, "", labelStyle.Render(fmt.Sprintf("selected: %d type(s) · %s configs", selected, humanCount(total))))
+		if m.typeErr != "" {
+			body = append(body, "", errStyle.Render("✖ "+m.typeErr))
+		}
+	}
+
+	lines := []string{
+		m.header(w, accentStyle.Render("● TYPE FILTER"), "filter by config type · "+m.cfg.TargetURL),
+		box("Config types", w, 0, body...),
+	}
+	if m.warning != "" {
+		lines = append(lines, warnStyle.Render("⚠ "+clip(m.warning, inner-2)))
+	}
+	if m.typeLoading {
+		lines = append(lines, hintStyle.Render("Ctrl+C = quit"))
+	} else {
+		lines = append(lines, hintStyle.Render("↑↓ = move · space = toggle · a = all · Enter = start run · Ctrl+C = quit"))
+	}
+	return strings.Join(lines, "\n")
 }
 
 // viewRunning renders the live mission-control screen.
