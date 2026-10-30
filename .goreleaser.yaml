@@ -38,10 +38,21 @@ archives:
       - goos: windows
         formats: [zip]
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    # Ship the default subscription list next to the binary so a freshly
+    # extracted archive works out of the box: the tool looks for sub-input.txt
+    # beside the executable. README and LICENSE are listed explicitly because
+    # setting `files` replaces GoReleaser's default (license*/README*) globs.
+    files:
+      - sub-input.txt
+      - README.md
+      - LICENSE
 
 checksum:
   # SHA256 sums of every artifact, uploaded as checksums.txt.
   name_template: "checksums.txt"
+  # Cover the standalone sub-input.txt release asset too.
+  extra_files:
+    - glob: sub-input.txt
 
 changelog:
   sort: asc
@@ -54,3 +65,7 @@ changelog:
 release:
   draft: false
   prerelease: auto
+  # Also publish sub-input.txt as a standalone release asset so users can view
+  # or download it without unpacking an archive.
+  extra_files:
+    - glob: sub-input.txt

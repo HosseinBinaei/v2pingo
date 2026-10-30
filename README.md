@@ -143,8 +143,13 @@ sums of every file:
 | `v2pingo_<version>_darwin_amd64.tar.gz` | macOS Intel |
 | `v2pingo_<version>_darwin_arm64.tar.gz` | macOS Apple Silicon |
 
+Each archive contains the binary next to `sub-input.txt`, `README.md` and `LICENSE`. The default
+subscription list [`sub-input.txt`](sub-input.txt) is also attached to the release as a standalone
+file, so you can read or update it without unpacking an archive.
+
 Download the archive for your platform, extract it and run the `v2pingo` binary — no runtime
-dependencies are needed (the binaries are fully static).
+dependencies are needed (the binaries are fully static). Because `sub-input.txt` sits beside the
+binary after extraction, the default subscriptions are picked up automatically.
 
 **Checking your version:** run `v2pingo -version` to print the release version the binary was
 built from. At startup the program also compares its version with the newest GitHub release in
