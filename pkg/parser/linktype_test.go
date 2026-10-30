@@ -59,3 +59,56 @@ func TestNormalizeTypeName(t *testing.T) {
 		}
 	}
 }
+
+func TestCountByType(t *testing.T) {
+	raw := []string{
+		"socks5://h:1080#1",
+		"1.2.3.4:1080",
+		"vless://uuid@h:443#2",
+		"vless://uuid@h:443#3",
+		"vmess://eyJ2IjoiMiJ9",
+	}
+	got := CountByType(raw)
+	want := []TypeCount{
+		{Type: "vmess", Count: 1},
+		{Type: "vless", Count: 2},
+		{Type: "socks", Count: 2},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("CountByType = %+v, want %+v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("CountByType[%d] = %+v, want %+v", i, got[i], want[i])
+		}
+	}
+	if counts := CountByType(nil); len(counts) != 0 {
+		t.Errorf("CountByType(nil) = %+v, want empty", counts)
+	}
+}
+
+func TestFilterByTypes(t *testing.T) {
+	raw := []string{
+		"socks5://h:1080#1",
+		"1.2.3.4:1080",
+		"vless://uuid@h:443#2",
+		"vmess://eyJ2IjoiMiJ9",
+	}
+	if got := FilterByTypes(raw, nil); len(got) != len(raw) {
+		t.Errorf("nil types must keep all links, got %d", len(got))
+	}
+	if got := FilterByTypes(raw, []string{}); len(got) != len(raw) {
+		t.Errorf("empty types must keep all links, got %d", len(got))
+	}
+	got := FilterByTypes(raw, []string{"socks"})
+	if len(got) != 2 || got[0] != raw[0] || got[1] != raw[1] {
+		t.Errorf("socks filter = %v, want the two socks links in order", got)
+	}
+	got = FilterByTypes(raw, []string{"SOCKS", "vmess"})
+	if len(got) != 3 {
+		t.Errorf("case-insensitive multi-type filter = %v, want 3 links", got)
+	}
+	if got := FilterByTypes(raw, []string{"wireguard"}); len(got) != 0 {
+		t.Errorf("unmatched type must filter everything out, got %v", got)
+	}
+}
