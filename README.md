@@ -16,6 +16,7 @@ concurrency and timeout controls.
 - [Features](#features)
 - [Requirements](#requirements)
 - [Installation & Build](#installation--build)
+  - [Releases (prebuilt binaries)](#releases-prebuilt-binaries)
   - [Windows](#windows)
   - [Linux](#linux)
   - [macOS](#macos)
@@ -121,10 +122,43 @@ concurrency and timeout controls.
 
 ## Installation & Build
 
-Prebuilt binaries are **not** committed to the repository (`*.exe` is git-ignored). Build the
-executable locally with the commands below.
+The easiest way is a prebuilt binary from [GitHub Releases](https://github.com/HosseinBinaei/v2pingo/releases/latest)
+— see [Releases](#releases-prebuilt-binaries) below. To build from source instead (`*.exe` files are
+never committed to the repository), use the commands below.
 
 > Replace the clone URL with your own fork if you are working on a copy.
+
+### Releases (prebuilt binaries)
+
+Every release is built automatically by GitHub Actions for all supported platforms, wrapped in a
+zip (Windows) or tar.gz (Linux/macOS) archive and accompanied by a `checksums.txt` with SHA256
+sums of every file:
+
+| Archive | Platform |
+|---|---|
+| `v2pingo_<version>_windows_amd64.zip` | Windows 64-bit |
+| `v2pingo_<version>_windows_arm64.zip` | Windows ARM64 |
+| `v2pingo_<version>_linux_amd64.tar.gz` | Linux x86-64 |
+| `v2pingo_<version>_linux_arm64.tar.gz` | Linux ARM64 (Raspberry Pi / ARM server) |
+| `v2pingo_<version>_darwin_amd64.tar.gz` | macOS Intel |
+| `v2pingo_<version>_darwin_arm64.tar.gz` | macOS Apple Silicon |
+
+Download the archive for your platform, extract it and run the `v2pingo` binary — no runtime
+dependencies are needed (the binaries are fully static).
+
+**Checking your version:** run `v2pingo -version` to print the release version the binary was
+built from. At startup the program also compares its version with the newest GitHub release in
+the background and, when a newer one exists, prints a single one-line hint (the check is
+best-effort, never blocks the run and is skipped in `dev` builds).
+
+**Cutting a release (maintainers):** the whole process is two commands — GoReleaser
+([`.goreleaser.yaml`](.goreleaser.yaml)) does the rest inside
+[`.github/workflows/release.yml`](.github/workflows/release.yml):
+
+```bash
+git tag v1.0.0
+git push origin v1.0.0
+```
 
 ### Windows
 
@@ -462,6 +496,7 @@ Refresh subscriptions from GitHub? [y/N]:
 | `-cache-dir` | `string` | `cache` | Directory that keeps the fetched subscription files. |
 | `-types` | `string` | *(empty)* | Comma-separated config types to test (`vmess, vless, trojan, ss, socks, hysteria2, wireguard`; aliases `ss/socks5/hy2/wg` accepted). Empty tests everything and asks on the TUI type-filter screen; a value skips that screen and filters right after the fetch. |
 | `-v`, `-verbose` | `bool` | `false` | Enable verbose output (prints failed tests). |
+| `-version` | — | — | Print the version (`dev` for plain `go build` outputs, the release tag for release binaries) and exit. |
 | `-paste` | `bool` | `true` | Ask whether to upload the saved results file to the paste service (`false` never asks). |
 | `-paste-url` | `string` | `https://paste.rs/` | Paste service endpoint used when `-paste` is enabled. The default gets automatic fallbacks (paste.c-net.org, then dpaste.org); a custom endpoint is used alone. |
 
