@@ -5,9 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"v2pingo/pkg/parser"
 	"v2pingo/pkg/paste"
 	"v2pingo/pkg/runner"
 	"v2pingo/pkg/subscription"
@@ -29,6 +31,11 @@ type Options struct {
 	// empty directory disables caching, so nothing is read from or written to
 	// disk and every source is downloaded.
 	CacheDir string
+	// Types restricts the run to these canonical config types (from -types).
+	// Empty means every type is tested and the TUI asks on the type-filter
+	// screen; when set, that screen is skipped and the filter is applied
+	// right after the fetch.
+	Types []string
 }
 
 // PasteDoneMsg carries the outcome of an on-demand paste upload.
@@ -38,11 +45,12 @@ type PasteDoneMsg struct {
 }
 
 // bound is the running program, set by Run before prog.Run() so Update can
-// start the background test goroutine when StartTestsMsg arrives.
-// boundCancel stops the in-flight run (set synchronously by
-// startBackgroundRun); the 'q' key and Ctrl+C in Update call it so the
-// goroutine winds down and sends the single final DoneMsg, which moves the
-// UI to the done screen and decides the paste question.
+// start the background goroutines when FetchSourcesMsg or StartTestsMsg
+// arrives.
+// boundCancel stops the in-flight run (set synchronously by startTests); the
+// 'q' key and Ctrl+C in Update call it so the goroutine winds down and sends
+// the single final DoneMsg, which moves the UI to the done screen and decides
+// the paste question.
 var bound *tea.Program
 
 var boundCancel context.CancelFunc
@@ -63,23 +71,15 @@ func Run(subs []string, target string, workers int, timeout time.Duration, opts 
 	return err
 }
 
-// startBackgroundRun executes fetch -> dedupe -> RunPool off the UI thread
-// and forwards every result with prog.Send (goroutine-safe in BubbleTea). The
-// subscription sources come from the cache directory or from GitHub according
-// to opts.FetchMode, which the caller resolved before the UI started.
-//
-// The run context is created here — synchronously on the UI goroutine — so
-// boundCancel is stored before this function returns; a q pressed right after
-// Enter can then always reach the cancel func, and storing it from the
-// goroutine would be a data race with the Update loop that reads it.
-func startBackgroundRun(prog *tea.Program, cfg FormConfig, opts Options) {
-	ctx, cancel := context.WithCancel(context.Background())
-	boundCancel = cancel
+// startFetch downloads (or reads cached) subscription sources off the UI
+// thread and forwards warnings as NoticeMsg. It then either hands the links to
+// the type-filter screen via TypesFoundMsg, or — when -types already decided
+// the filter — calls startTests directly so the selector screen is skipped.
+func startFetch(prog *tea.Program, cfg FormConfig, opts Options) {
 	go func() {
 		start := time.Now()
-		defer cancel()
 		client := &http.Client{Timeout: 30 * time.Second}
-		fctx, fcancel := context.WithTimeout(ctx, 60*time.Second)
+		fctx, fcancel := context.WithTimeout(context.Background(), 60*time.Second)
 		// Fetch warnings must never reach the console directly: while the
 		// dashboard is on screen a stray write corrupts the rendered frame, so
 		// they are forwarded into the BubbleTea loop and shown by the UI itself.
@@ -87,17 +87,43 @@ func startBackgroundRun(prog *tea.Program, cfg FormConfig, opts Options) {
 			prog.Send(NoticeMsg{Text: fmt.Sprintf(format, args...)})
 		})
 		fcancel()
-		resultsFile := runner.DefaultResultsFile()
-		checkpointFile := resultsFile + ".checkpoint"
-		prog.Send(TotalMsg{Total: len(rawLinks)})
-		col := &Collector{}
 		if len(rawLinks) == 0 {
 			prog.Send(DoneMsg{Notice: "No valid configs", Elapsed: time.Since(start)})
 			return
 		}
-		// Batched run: at most one 5k batch of configs in RAM; healthy links
-		// are appended to resultsFile after each batch with resume support.
-		runErr := runner.RunBatches(ctx, rawLinks, runner.BatchConfig{
+		if len(opts.Types) > 0 {
+			prog.Send(NoticeMsg{Text: "type filter: " + strings.Join(opts.Types, ", ")})
+			startTests(prog, cfg, opts, rawLinks, opts.Types)
+			return
+		}
+		prog.Send(TypesFoundMsg{Counts: parser.CountByType(rawLinks), Links: rawLinks})
+	}()
+}
+
+// startTests filters the raw links down to types, then runs the batched test
+// pool off the UI thread exactly as before: at most one 5k batch in RAM,
+// healthy links appended to the results file batch by batch, a single final
+// DoneMsg. The run context is created here — synchronously before the
+// goroutine starts — so boundCancel is stored before any TotalMsg can flip the
+// screen to running and make q reach the cancel func; the selector-Enter path
+// calls this from the Update loop itself, same as the old single-goroutine
+// design.
+func startTests(prog *tea.Program, cfg FormConfig, opts Options, rawLinks []string, typesFilter []string) {
+	ctx, cancel := context.WithCancel(context.Background())
+	boundCancel = cancel
+	go func() {
+		start := time.Now()
+		defer cancel()
+		filtered := parser.FilterByTypes(rawLinks, typesFilter)
+		if len(filtered) == 0 {
+			prog.Send(DoneMsg{Notice: "no configs of the selected types", Elapsed: time.Since(start)})
+			return
+		}
+		resultsFile := runner.DefaultResultsFile()
+		checkpointFile := resultsFile + ".checkpoint"
+		prog.Send(TotalMsg{Total: len(filtered)})
+		col := &Collector{}
+		runErr := runner.RunBatches(ctx, filtered, runner.BatchConfig{
 			TargetURL:      cfg.TargetURL,
 			Concurrency:    cfg.Workers,
 			Timeout:        cfg.Timeout,
@@ -119,9 +145,6 @@ func startBackgroundRun(prog *tea.Program, cfg FormConfig, opts Options) {
 	}()
 }
 
-// uploadResults returns a command that publishes path to the paste service off
-// the UI thread. The user triggers it explicitly from the done screen; a
-// missing or empty file resolves to an empty link and no error.
 func uploadResults(path, endpoint string) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)

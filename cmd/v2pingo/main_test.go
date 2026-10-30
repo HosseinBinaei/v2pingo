@@ -673,3 +673,69 @@ func TestCLIIntegrationSubscriptionFile(t *testing.T) {
 		t.Errorf("output missing TEST SUMMARY: %s", outStr)
 	}
 }
+
+func TestParseTypesFlag(t *testing.T) {
+	if got, err := parseTypesFlag(""); err != nil || got != nil {
+		t.Errorf("empty flag must disable filtering, got (%v, %v)", got, err)
+	}
+	if got, err := parseTypesFlag("   "); err != nil || got != nil {
+		t.Errorf("blank flag must disable filtering, got (%v, %v)", got, err)
+	}
+	got, err := parseTypesFlag("socks")
+	if err != nil || len(got) != 1 || got[0] != "socks" {
+		t.Errorf("single type: got (%v, %v)", got, err)
+	}
+	got, err = parseTypesFlag("ss, Socks5")
+	if err != nil || len(got) != 2 || got[0] != "shadowsocks" || got[1] != "socks" {
+		t.Errorf("aliases must resolve canonically: got (%v, %v)", got, err)
+	}
+	got, err = parseTypesFlag("vmess,vmess , hy2")
+	if err != nil || len(got) != 2 || got[0] != "vmess" || got[1] != "hysteria2" {
+		t.Errorf("duplicates must collapse: got (%v, %v)", got, err)
+	}
+	if got, err := parseTypesFlag("vmess,bogus"); err == nil || got != nil {
+		t.Errorf("unknown type must fail with the valid names listed, got (%v, %v)", got, err)
+	}
+}
+
+// TestCLIIntegrationTypeFilter covers -types in the CLI path: the mixed source
+// keeps only the selected type and says so.
+func TestCLIIntegrationTypeFilter(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, "vless://00000000-0000-0000-0000-000000000000@127.0.0.1:1080?type=tcp#V\nsocks5://127.0.0.1:1080#S\n")
+	}))
+	defer ts.Close()
+
+	tmpDir := t.TempDir()
+	binPath := filepath.Join(tmpDir, "v2pingo_types_test.exe")
+	buildCmd := exec.Command(goExecutable(), "build", "-o", binPath, ".")
+	if buildOut, err := buildCmd.CombinedOutput(); err != nil {
+		t.Fatalf("failed to build test binary: %v\nOutput: %s", err, string(buildOut))
+	}
+
+	cmd := exec.Command(binPath,
+		"-default-subs=false",
+		"-sub", ts.URL,
+		"-c", "1",
+		"-timeout", "1s",
+		"-v",
+		"-paste=false",
+		"-cache=false",
+		"-types", "socks",
+	)
+	cmd.Dir = tmpDir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("binary execution failed: %v\nOutput: %s", err, string(out))
+	}
+	outStr := string(out)
+	if !strings.Contains(outStr, "Extracted 2 raw proxy share links.") {
+		t.Errorf("output missing extracted line: %s", outStr)
+	}
+	if !strings.Contains(outStr, "Type filter socks: kept 1 of 2 links.") {
+		t.Errorf("output missing type filter line: %s", outStr)
+	}
+	if !strings.Contains(outStr, "TEST SUMMARY") {
+		t.Errorf("output missing TEST SUMMARY: %s", outStr)
+	}
+}

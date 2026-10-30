@@ -63,24 +63,28 @@ func ParseAndConvert(rawLink string, index int) (*types.ProxyConfig, error) {
 		return nil, fmt.Errorf("empty raw link")
 	}
 
-	lower := strings.ToLower(trimmed)
-	switch {
-	case strings.HasPrefix(lower, "vless://"):
+	typ, ok := LinkType(trimmed)
+	if !ok {
+		return nil, fmt.Errorf("unsupported protocol scheme in link: %s", rawLink)
+	}
+	switch typ {
+	case "vless":
 		return parseVLESS(trimmed, index)
-	case strings.HasPrefix(lower, "vmess://"):
+	case "vmess":
 		return parseVMess(trimmed, index)
-	case strings.HasPrefix(lower, "trojan://"):
+	case "trojan":
 		return parseTrojan(trimmed, index)
-	case strings.HasPrefix(lower, "ss://"):
+	case "shadowsocks":
 		return parseShadowsocks(trimmed, index)
-	case strings.HasPrefix(lower, "socks://"), strings.HasPrefix(lower, "socks5://"):
+	case "socks":
+		if IsBareAddress(trimmed) {
+			return parseBareSOCKS(trimmed, index)
+		}
 		return parseSOCKS(trimmed, index)
-	case strings.HasPrefix(lower, "hysteria2://"), strings.HasPrefix(lower, "hy2://"):
+	case "hysteria2":
 		return parseHysteria2(trimmed, index)
-	case strings.HasPrefix(lower, "wireguard://"), strings.HasPrefix(lower, "wg://"):
+	case "wireguard":
 		return parseWireGuard(trimmed, index)
-	case IsBareAddress(trimmed):
-		return parseBareSOCKS(trimmed, index)
 	default:
 		return nil, fmt.Errorf("unsupported protocol scheme in link: %s", rawLink)
 	}

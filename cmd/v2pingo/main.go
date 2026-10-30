@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"v2pingo/pkg/paste"
+	"v2pingo/pkg/parser"
 	"v2pingo/pkg/reporter"
 	"v2pingo/pkg/runner"
 	"v2pingo/pkg/subscription"
@@ -54,6 +55,7 @@ func main() {
 	pasteURLFlag := flag.String("paste-url", paste.DefaultEndpoint, "Paste service endpoint used by -paste (a custom endpoint disables the built-in fallback services)")
 	cacheFlag := flag.Bool("cache", true, "Ask whether to reuse the cached subscription files (false disables the cache)")
 	cacheDirFlag := flag.String("cache-dir", subscription.DefaultCacheDir, "Directory that keeps the fetched subscription files")
+	typesFlag := flag.String("types", "", "Only test these config types (comma-separated: vmess, vless, trojan, ss, socks, hysteria2, wireguard; empty = all)")
 
 	flag.Parse()
 
@@ -61,6 +63,11 @@ func main() {
 	// is lost between the cache question and the paste questions.
 	reader := bufio.NewReader(os.Stdin)
 	cacheDir := resolveCacheDir(*cacheDirFlag, *cacheFlag)
+	typeFilter, err := parseTypesFlag(*typesFlag)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
 
 	if *tuiFlag && isTerminal() {
 		subFilePath := subscription.ResolveSubscriptionFile(*subFileFlag)
@@ -71,6 +78,7 @@ func main() {
 			PasteEndpoint: *pasteURLFlag,
 			FetchMode:     resolveFetchMode(reader, cacheDir),
 			CacheDir:      cacheDir,
+			Types:         typeFilter,
 		}); err != nil {
 			fmt.Fprintf(os.Stderr, "TUI error: %v\n", err)
 			os.Exit(1)
@@ -112,6 +120,12 @@ func main() {
 
 	fmt.Printf("Extracted %d raw proxy share links.\n", len(rawLinks))
 
+	if len(typeFilter) > 0 {
+		kept := parser.FilterByTypes(rawLinks, typeFilter)
+		fmt.Printf("Type filter %s: kept %d of %d links.\n", strings.Join(typeFilter, ", "), len(kept), len(rawLinks))
+		rawLinks = kept
+	}
+
 	if len(rawLinks) == 0 {
 		fmt.Fprintln(os.Stderr, "No valid proxy configurations found to test.")
 		os.Exit(0)
@@ -125,7 +139,7 @@ func main() {
 	checkpointFile := resultsFile + ".checkpoint"
 
 	startTime := time.Now()
-	err := runner.RunBatches(rootCtx, rawLinks, runner.BatchConfig{
+	err = runner.RunBatches(rootCtx, rawLinks, runner.BatchConfig{
 		TargetURL:      *targetURLFlag,
 		Concurrency:    *concurrencyFlag,
 		Timeout:        *timeoutFlag,
@@ -144,6 +158,28 @@ func main() {
 	if *pasteFlag {
 		promptPasteUpload(reader, resultsFile, *pasteURLFlag)
 	}
+}
+
+// parseTypesFlag turns the -types value into canonical type names. An empty or
+// blank value disables filtering (nil); unknown names fail with the valid
+// names listed so the user can correct the flag.
+func parseTypesFlag(value string) ([]string, error) {
+	if strings.TrimSpace(value) == "" {
+		return nil, nil
+	}
+	seen := make(map[string]bool)
+	var out []string
+	for _, part := range strings.Split(value, ",") {
+		name, ok := parser.NormalizeTypeName(part)
+		if !ok {
+			return nil, fmt.Errorf("unknown config type %q (valid: vmess, vless, trojan, ss/shadowsocks, socks/socks5, hysteria2/hy2, wireguard/wg)", strings.TrimSpace(part))
+		}
+		if !seen[name] {
+			seen[name] = true
+			out = append(out, name)
+		}
+	}
+	return out, nil
 }
 
 // resolveCacheDir returns the directory used for cached subscription sources, or
