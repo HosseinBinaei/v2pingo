@@ -112,3 +112,33 @@ func TestFilterByTypes(t *testing.T) {
 		t.Errorf("unmatched type must filter everything out, got %v", got)
 	}
 }
+
+// TestLinkTypeMatchesParseAndConvert pins that classification and parsing
+// agree: everything LinkType accepts must reach a protocol parser, and
+// everything it rejects must be rejected by ParseAndConvert too.
+func TestLinkTypeMatchesParseAndConvert(t *testing.T) {
+	accepted := []string{
+		"vless://00000000-0000-0000-0000-000000000000@127.0.0.1:1080?type=tcp#n",
+		"vmess://eyJ2IjoiMiIsInBzIjoibiIsImFkZCI6IjEyNy4wLjAuMSIsInBvcnQiOjEwODAsImlkIjoiMTIzNDU2NzgtMTIzNC0xMjM0LTEyMzQtMTIzNDU2Nzg5MDEyIn0",
+		"trojan://pass@127.0.0.1:443?sni=h#n",
+		"ss://YWVzLTI1Ni1nY206cGFzcw@127.0.0.1:8388#n",
+		"socks5://127.0.0.1:1080#n",
+		"1.2.3.4:1080",
+	}
+	for _, raw := range accepted {
+		if _, ok := LinkType(raw); !ok {
+			t.Errorf("LinkType must accept %q", raw)
+		}
+		if _, err := ParseAndConvert(raw, 1); err != nil {
+			t.Errorf("ParseAndConvert rejected a LinkType-accepted link %q: %v", raw, err)
+		}
+	}
+	for _, raw := range []string{"http://example.com", "not-a-link", "1.2.3.4"} {
+		if _, ok := LinkType(raw); ok {
+			t.Errorf("LinkType must reject %q", raw)
+		}
+		if _, err := ParseAndConvert(raw, 1); err == nil {
+			t.Errorf("ParseAndConvert must reject %q", raw)
+		}
+	}
+}

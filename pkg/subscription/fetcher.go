@@ -285,20 +285,8 @@ func fetchPayload(ctx context.Context, client *http.Client, normURL string) ([]b
 // test: either a supported scheme-prefixed share link, or a bare "ip:port"
 // address, which the parser treats as an unauthenticated SOCKS5 proxy.
 func isProxyLink(s string) bool {
-	lower := strings.ToLower(s)
-	if strings.HasPrefix(lower, "vless://") ||
-		strings.HasPrefix(lower, "vmess://") ||
-		strings.HasPrefix(lower, "trojan://") ||
-		strings.HasPrefix(lower, "ss://") ||
-		strings.HasPrefix(lower, "socks://") ||
-		strings.HasPrefix(lower, "socks5://") ||
-		strings.HasPrefix(lower, "hysteria2://") ||
-		strings.HasPrefix(lower, "hy2://") ||
-		strings.HasPrefix(lower, "wireguard://") ||
-		strings.HasPrefix(lower, "wg://") {
-		return true
-	}
-	return parser.IsBareAddress(s)
+	_, ok := parser.LinkType(s)
+	return ok
 }
 
 func stripWhitespace(b []byte) []byte {
