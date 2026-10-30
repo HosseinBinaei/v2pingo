@@ -57,8 +57,18 @@ func main() {
 	cacheFlag := flag.Bool("cache", true, "Ask whether to reuse the cached subscription files (false disables the cache)")
 	cacheDirFlag := flag.String("cache-dir", subscription.DefaultCacheDir, "Directory that keeps the fetched subscription files")
 	typesFlag := flag.String("types", "", "Only test these config types (comma-separated: vmess, vless, trojan, ss, socks, hysteria2, wireguard; empty = all)")
+	versionFlag := flag.Bool("version", false, "Print the version and exit")
 
 	flag.Parse()
+
+	if *versionFlag {
+		fmt.Printf("v2pingo %s\n", version)
+		return
+	}
+
+	// The update probe runs in the background for the whole process; both run
+	// modes consume its single notice without ever waiting on it.
+	updateCh := startUpdateCheck(version)
 
 	// Every interactive question shares one buffered reader so no buffered line
 	// is lost between the cache question and the paste questions.
@@ -80,11 +90,23 @@ func main() {
 			FetchMode:     resolveFetchMode(reader, cacheDir),
 			CacheDir:      cacheDir,
 			Types:         typeFilter,
+			UpdateChan:    updateCh,
 		}); err != nil {
 			fmt.Fprintf(os.Stderr, "TUI error: %v\n", err)
 			os.Exit(1)
 		}
 		return
+	}
+
+	// CLI mode prints the update notice to stderr as soon as the probe
+	// answers, on its own line; if the run ends first, the parked goroutine
+	// simply dies with the process.
+	if updateCh != nil {
+		go func() {
+			if notice := <-updateCh; notice != "" {
+				fmt.Fprintln(os.Stderr, notice)
+			}
+		}()
 	}
 
 	// Assemble subscription URL list

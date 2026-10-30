@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"io"
 	"net"
@@ -754,5 +755,59 @@ func TestCLIIntegrationTypeFilter(t *testing.T) {
 	}
 	if !strings.Contains(outStr, "TEST SUMMARY") {
 		t.Errorf("output missing TEST SUMMARY: %s", outStr)
+	}
+}
+
+// TestStartUpdateCheckDisabled covers the dev-build short-circuit: without a
+// comparable release version the probe never starts and the channel is nil.
+func TestStartUpdateCheckDisabled(t *testing.T) {
+	for _, current := range []string{"dev", "", "  "} {
+		if ch := startUpdateCheck(current); ch != nil {
+			t.Errorf("startUpdateCheck(%q) must be disabled, got a channel", current)
+		}
+	}
+}
+
+// TestStartUpdateCheckDeliversNotice stubs the probe and verifies the channel
+// carries exactly the probe's one-line notice. The stub channel is buffered so
+// the test never depends on goroutine timing.
+func TestStartUpdateCheckDeliversNotice(t *testing.T) {
+	orig := noticeProbe
+	defer func() { noticeProbe = orig }()
+	noticeProbe = func(ctx context.Context, client *http.Client, current, endpoint string) string {
+		if current != "v1.0.0" {
+			t.Errorf("probe must run for the built version, got %q", current)
+		}
+		if endpoint != "" || client != nil {
+			t.Errorf("probe must use the defaults, got endpoint %q client %v", endpoint, client)
+		}
+		return "Update available: v9.9.9 (you are running v1.0.0)"
+	}
+
+	ch := startUpdateCheck("v1.0.0")
+	if ch == nil {
+		t.Fatal("startUpdateCheck must return a channel for a release version")
+	}
+	select {
+	case got := <-ch:
+		if got != "Update available: v9.9.9 (you are running v1.0.0)" {
+			t.Errorf("unexpected notice %q", got)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the notice never arrived on the channel")
+	}
+}
+
+// TestVersionFlagIntegration verifies -version prints the injected version and
+// exits immediately, before any subscription or testing machinery starts.
+func TestVersionFlagIntegration(t *testing.T) {
+	binPath := pasteTestBinary(t, "v2pingo_version_test.exe")
+
+	out, err := exec.Command(binPath, "-version").CombinedOutput()
+	if err != nil {
+		t.Fatalf("-version must exit successfully, got %v\nOutput: %s", err, string(out))
+	}
+	if outStr := string(out); !strings.Contains(outStr, "v2pingo") {
+		t.Errorf("expected the version banner, got:\n%s", outStr)
 	}
 }
