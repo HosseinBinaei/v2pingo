@@ -268,7 +268,7 @@ Run the tool from the directory that contains `sub-input.txt`, so the subscripti
 ### 1. Default run
 
 Reads the subscription URLs listed in `sub-input.txt`, extracts all supported configurations,
-deduplicates them, and tests against `https://x.com` with 20 workers:
+deduplicates them, and tests against `https://cloudflare.com` with 20 workers:
 
 ```bash
 # Linux / macOS
@@ -450,7 +450,7 @@ Refresh subscriptions from GitHub? [y/N]:
 
 | Flag | Type | Default | Description |
 |---|---|---|---|
-| `-url` | `string` | `https://x.com` | Target test URL for end-to-end HTTP GET verification. |
+| `-url` | `string` | `https://cloudflare.com` | Target test URL for end-to-end HTTP GET verification. |
 | `-c` | `int` | `20` | Concurrency level (number of worker goroutines). |
 | `-timeout` | `duration` | `15s` | Timeout for each proxy configuration test. |
 | `-batch` | `int` | `5000` | Configs parsed/tested per batch (bounds RAM; results are appended incrementally). |

@@ -14,7 +14,7 @@ import (
 )
 
 func TestModel_ResultMsgUpdatesCounters(t *testing.T) {
-	m := NewModel([]string{"https://a.com/s"}, "https://x.com", 20, 15*time.Second)
+	m := NewModel([]string{"https://a.com/s"}, "https://cloudflare.com", 20, 15*time.Second)
 	m.screen = ScreenRunning
 	next, _ := m.Update(ResultMsg{Res: types.TestResult{
 		Config:     types.ProxyConfig{RawLink: "vless://a#1"},
@@ -31,7 +31,7 @@ func TestModel_ResultMsgUpdatesCounters(t *testing.T) {
 }
 
 func TestModel_Non2xxNotSavedButCounted(t *testing.T) {
-	m := NewModel([]string{"https://a.com/s"}, "https://x.com", 20, 15*time.Second)
+	m := NewModel([]string{"https://a.com/s"}, "https://cloudflare.com", 20, 15*time.Second)
 	m.screen = ScreenRunning
 	next, _ := m.Update(ResultMsg{Res: types.TestResult{
 		Config:     types.ProxyConfig{RawLink: "vless://a#x"},
@@ -45,7 +45,7 @@ func TestModel_Non2xxNotSavedButCounted(t *testing.T) {
 }
 
 func TestModel_DoneMsgSwitchesToDoneScreen(t *testing.T) {
-	m := NewModel([]string{"https://a.com/s"}, "https://x.com", 20, 15*time.Second)
+	m := NewModel([]string{"https://a.com/s"}, "https://cloudflare.com", 20, 15*time.Second)
 	m.screen = ScreenRunning
 	next, _ := m.Update(DoneMsg{Tested: 5, Success: 2, Failed: 3, SavedFile: "results/x.md"})
 	if next.(Model).screen != ScreenDone {
@@ -54,7 +54,7 @@ func TestModel_DoneMsgSwitchesToDoneScreen(t *testing.T) {
 }
 
 func TestModel_QuitKeyQuits(t *testing.T) {
-	m := NewModel([]string{"https://a.com/s"}, "https://x.com", 20, 15*time.Second)
+	m := NewModel([]string{"https://a.com/s"}, "https://cloudflare.com", 20, 15*time.Second)
 	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
 	if cmd == nil {
 		t.Fatalf("expected a quit command on Ctrl+C")
@@ -62,7 +62,7 @@ func TestModel_QuitKeyQuits(t *testing.T) {
 }
 
 func TestModel_TotalMsgSetsTotalAndSurvivesResults(t *testing.T) {
-	m := NewModel([]string{"https://a.com/s"}, "https://x.com", 20, 15*time.Second)
+	m := NewModel([]string{"https://a.com/s"}, "https://cloudflare.com", 20, 15*time.Second)
 	m.screen = ScreenRunning
 	next, _ := m.Update(TotalMsg{Total: 5})
 	if got := next.(Model); got.total != 5 {
@@ -79,9 +79,9 @@ func TestModel_TotalMsgSetsTotalAndSurvivesResults(t *testing.T) {
 }
 
 func TestModel_NoticeMsgShowsWarningOnRunningScreen(t *testing.T) {
-	m := NewModel([]string{"https://a.com/s"}, "https://x.com", 20, 15*time.Second)
+	m := NewModel([]string{"https://a.com/s"}, "https://cloudflare.com", 20, 15*time.Second)
 	m.screen = ScreenRunning
-	m.cfg = FormConfig{Subs: []string{"https://a.com/s"}, TargetURL: "https://x.com", Workers: 20, Timeout: 15 * time.Second}
+	m.cfg = FormConfig{Subs: []string{"https://a.com/s"}, TargetURL: "https://cloudflare.com", Workers: 20, Timeout: 15 * time.Second}
 	warning := "failed to fetch subscription https://a.com/s: boom"
 	next, _ := m.Update(NoticeMsg{Text: warning})
 	got := next.(Model)
@@ -95,7 +95,7 @@ func TestModel_NoticeMsgShowsWarningOnRunningScreen(t *testing.T) {
 }
 
 func TestModel_NewRunClearsStaleWarning(t *testing.T) {
-	m := NewModel([]string{"https://a.com/s"}, "https://x.com", 20, 15*time.Second)
+	m := NewModel([]string{"https://a.com/s"}, "https://cloudflare.com", 20, 15*time.Second)
 	m.screen = ScreenRunning
 	warned, _ := m.Update(NoticeMsg{Text: "stale warning"})
 	if got := warned.(Model); got.warning == "" {
@@ -124,7 +124,7 @@ func TestModel_QCancelsRunWithoutQuitting(t *testing.T) {
 	boundCancel = func() { cancelled = true }
 	defer func() { boundCancel = nil }()
 
-	m := NewModel([]string{"https://a.com/s"}, "https://x.com", 20, 15*time.Second)
+	m := NewModel([]string{"https://a.com/s"}, "https://cloudflare.com", 20, 15*time.Second)
 	m.screen = ScreenRunning
 	m.tested, m.succeeded, m.failed = 3, 2, 1
 	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
@@ -153,7 +153,7 @@ func TestModel_QCancelsRunWithoutQuitting(t *testing.T) {
 // newSavedRunModel returns a done-screen model that just finished a run which
 // saved one healthy link, with paste asking enabled.
 func newSavedRunModel() Model {
-	m := NewModel([]string{"https://a.com/s"}, "https://x.com", 20, 15*time.Second)
+	m := NewModel([]string{"https://a.com/s"}, "https://cloudflare.com", 20, 15*time.Second)
 	m.opts = Options{AskPaste: true}
 	m.screen = ScreenRunning
 	next, _ := m.Update(DoneMsg{Tested: 5, Success: 2, Failed: 3, SavedFile: "results/x.md", Links: []string{"vless://a#1"}})
@@ -323,7 +323,7 @@ func TestModel_NoPasteQuestionWithoutSavedResults(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			m := NewModel([]string{"https://a.com/s"}, "https://x.com", 20, 15*time.Second)
+			m := NewModel([]string{"https://a.com/s"}, "https://cloudflare.com", 20, 15*time.Second)
 			m.opts = tc.opts
 			m.screen = ScreenRunning
 			next, _ := m.Update(tc.msg)
@@ -346,7 +346,7 @@ func TestModel_QOnDoneWhilePromptPendingQuits(t *testing.T) {
 }
 
 func TestModel_PartialDoneMsgShowsNotice(t *testing.T) {
-	m := NewModel([]string{"https://a.com/s"}, "https://x.com", 20, 15*time.Second)
+	m := NewModel([]string{"https://a.com/s"}, "https://cloudflare.com", 20, 15*time.Second)
 	m.screen = ScreenRunning
 	next, _ := m.Update(DoneMsg{Notice: "No valid configs"})
 	got := next.(Model)
@@ -363,7 +363,7 @@ func TestModel_CtrlCOnRunningCancelsInsteadOfQuitting(t *testing.T) {
 	boundCancel = func() { cancelled = true }
 	defer func() { boundCancel = nil }()
 
-	m := NewModel([]string{"https://a.com/s"}, "https://x.com", 20, 15*time.Second)
+	m := NewModel([]string{"https://a.com/s"}, "https://cloudflare.com", 20, 15*time.Second)
 	m.screen = ScreenRunning
 	m.tested, m.succeeded, m.failed = 3, 2, 1
 	m.links = []string{"vless://a#1"}
@@ -385,7 +385,7 @@ func TestModel_CtrlCOnRunningCancelsInsteadOfQuitting(t *testing.T) {
 }
 
 func TestModel_FormShowsWhereSourcesComeFrom(t *testing.T) {
-	fresh := NewModel([]string{"https://a.com/s"}, "https://x.com", 20, 15*time.Second)
+	fresh := NewModel([]string{"https://a.com/s"}, "https://cloudflare.com", 20, 15*time.Second)
 	if view := fresh.View(); !strings.Contains(view, "fresh download") {
 		t.Fatalf("expected the default form to announce a fresh download, got %q", view)
 	}
@@ -404,7 +404,7 @@ func TestModel_FormShowsWhereSourcesComeFrom(t *testing.T) {
 }
 
 func TestModel_QOnDoneQuits(t *testing.T) {
-	m := NewModel([]string{"https://a.com/s"}, "https://x.com", 20, 15*time.Second)
+	m := NewModel([]string{"https://a.com/s"}, "https://cloudflare.com", 20, 15*time.Second)
 	m.screen = ScreenDone
 	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
 	if cmd == nil {
@@ -425,10 +425,10 @@ func interruptedRunModel(t *testing.T, interruptKey tea.KeyType, runes []rune) M
 	boundCancel = func() { cancelled = true }
 	t.Cleanup(func() { boundCancel = nil })
 
-	m := NewModel([]string{"https://a.com/s"}, "https://x.com", 20, 15*time.Second)
+	m := NewModel([]string{"https://a.com/s"}, "https://cloudflare.com", 20, 15*time.Second)
 	m.opts = Options{AskPaste: true}
 	m.screen = ScreenRunning
-	m.cfg = FormConfig{TargetURL: "https://x.com"}
+	m.cfg = FormConfig{TargetURL: "https://cloudflare.com"}
 	m.tested, m.succeeded, m.failed = 3, 2, 1
 	m.links = []string{"vless://a#1", "ss://b#2"}
 
@@ -546,10 +546,10 @@ func TestModel_InterruptBeforeRunStartNeverStartsTheRun(t *testing.T) {
 	bound = nil // no background runner wired in this test
 	defer func() { bound = savedBound }()
 
-	m := NewModel([]string{"https://a.com/s"}, "https://x.com", 20, 15*time.Second)
+	m := NewModel([]string{"https://a.com/s"}, "https://cloudflare.com", 20, 15*time.Second)
 	m.opts = Options{AskPaste: true}
 	m.screen = ScreenRunning
-	m.cfg = FormConfig{TargetURL: "https://x.com"}
+	m.cfg = FormConfig{TargetURL: "https://cloudflare.com"}
 
 	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
 	stopping := next.(Model)
@@ -558,7 +558,7 @@ func TestModel_InterruptBeforeRunStartNeverStartsTheRun(t *testing.T) {
 	}
 
 	// The queued StartTestsMsg arrives after the interrupt.
-	next, cmd = stopping.Update(StartTestsMsg{Cfg: FormConfig{TargetURL: "https://x.com"}})
+	next, cmd = stopping.Update(StartTestsMsg{Cfg: FormConfig{TargetURL: "https://cloudflare.com"}})
 	if cmd == nil {
 		t.Fatal("expected a cmd emitting the empty DoneMsg for the never-started run")
 	}
@@ -591,7 +591,7 @@ func TestModel_RepeatedInterruptsAreIgnored(t *testing.T) {
 	boundCancel = func() { cancelCalls++ }
 	defer func() { boundCancel = nil }()
 
-	m := NewModel([]string{"https://a.com/s"}, "https://x.com", 20, 15*time.Second)
+	m := NewModel([]string{"https://a.com/s"}, "https://cloudflare.com", 20, 15*time.Second)
 	m.screen = ScreenRunning
 	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
 	stopping := next.(Model)

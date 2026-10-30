@@ -13,7 +13,7 @@ import (
 // type-filter model plus the emitted FetchSourcesMsg.
 func formToTypeFilter(t *testing.T) (Model, FormConfig) {
 	t.Helper()
-	m := NewModel([]string{"https://a.com/s"}, "https://x.com", 20, 15*time.Second)
+	m := NewModel([]string{"https://a.com/s"}, "https://cloudflare.com", 20, 15*time.Second)
 	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	got := next.(Model)
 	if got.screen != ScreenTypeFilter || !got.typeLoading {
@@ -147,7 +147,7 @@ func TestTypeFilter_EnterStartsTestsWithSelection(t *testing.T) {
 	if len(msg.Types) != 2 || msg.Types[0] != "vless" || msg.Types[1] != "socks" {
 		t.Fatalf("selection must carry the checked types in order, got %v", msg.Types)
 	}
-	if msg.Cfg.TargetURL != "https://x.com" {
+	if msg.Cfg.TargetURL != "https://cloudflare.com" {
 		t.Fatalf("StartTestsMsg must carry the form config, got %+v", msg.Cfg)
 	}
 }

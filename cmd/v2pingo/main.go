@@ -17,6 +17,7 @@ import (
 	"v2pingo/pkg/reporter"
 	"v2pingo/pkg/runner"
 	"v2pingo/pkg/subscription"
+	"v2pingo/pkg/tester"
 	"v2pingo/pkg/tui"
 )
 
@@ -38,7 +39,7 @@ func (s *stringSliceFlag) Set(value string) error {
 }
 
 func main() {
-	targetURLFlag := flag.String("url", "https://x.com", "Target test URL")
+	targetURLFlag := flag.String("url", tester.DefaultTargetURL, "Target test URL")
 	concurrencyFlag := flag.Int("c", 20, "Concurrency workers")
 	timeoutFlag := flag.Duration("timeout", 15*time.Second, "Test timeout duration")
 	batchFlag := flag.Int("batch", runner.DefaultBatchSize, "Configs parsed/tested per batch (bounds RAM)")

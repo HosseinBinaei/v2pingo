@@ -674,6 +674,23 @@ func TestCLIIntegrationSubscriptionFile(t *testing.T) {
 	}
 }
 
+// TestCLIDefaultTargetURL verifies the -url flag ships the cloudflare.com
+// default: -h prints every flag with its default value, so the usage text
+// shows exactly what a plain run without -url would test against. (-h exits
+// with status 2, so its error is expected and ignored.)
+func TestCLIDefaultTargetURL(t *testing.T) {
+	binPath := pasteTestBinary(t, "v2pingo_default_url_test.exe")
+
+	out, _ := exec.Command(binPath, "-h").CombinedOutput()
+	outStr := string(out)
+	if !strings.Contains(outStr, "-url") {
+		t.Fatalf("usage output is missing the -url flag:\n%s", outStr)
+	}
+	if !strings.Contains(outStr, fmt.Sprintf("(default %q)", "https://cloudflare.com")) {
+		t.Errorf("expected -url to default to %q, got:\n%s", "https://cloudflare.com", outStr)
+	}
+}
+
 func TestParseTypesFlag(t *testing.T) {
 	if got, err := parseTypesFlag(""); err != nil || got != nil {
 		t.Errorf("empty flag must disable filtering, got (%v, %v)", got, err)

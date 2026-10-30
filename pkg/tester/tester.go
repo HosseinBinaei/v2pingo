@@ -18,6 +18,11 @@ import (
 	"v2pingo/pkg/types"
 )
 
+// DefaultTargetURL is the end-to-end verification target used unless the -url
+// flag overrides it: a plain HTTPS GET against it must succeed for a proxy
+// config to count as healthy.
+const DefaultTargetURL = "https://cloudflare.com"
+
 func CreateBoxContext(ctx context.Context) context.Context {
 	return box.Context(
 		ctx,

@@ -27,6 +27,14 @@ func TestCreateBoxContext(t *testing.T) {
 	}
 }
 
+// TestDefaultTargetURL locks the verification target every run uses unless
+// -url overrides it: an HTTPS URL that answers plain GETs worldwide.
+func TestDefaultTargetURL(t *testing.T) {
+	if DefaultTargetURL != "https://cloudflare.com" {
+		t.Errorf("DefaultTargetURL = %q, want %q", DefaultTargetURL, "https://cloudflare.com")
+	}
+}
+
 func TestTestProxyDirect(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
